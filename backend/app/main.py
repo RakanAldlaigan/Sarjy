@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import health, voice
+from app.routes import health, sessions, voice
 
 app = FastAPI(title="Sarjy API")
 
@@ -14,3 +14,4 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(voice.router)
+app.include_router(sessions.router)

@@ -2,7 +2,8 @@ create table sessions (
     id uuid primary key default gen_random_uuid(),
     created_at timestamptz not null default now(),
     last_active_at timestamptz not null default now(),
-    closed_at timestamptz
+    closed_at timestamptz,
+    is_empty boolean not null default true
 );
 
 create table messages (

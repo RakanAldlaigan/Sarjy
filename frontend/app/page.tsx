@@ -1,27 +1,104 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import ChatWindow, { ChatMessage } from "@/app/components/ChatWindow";
+import SessionSidebar from "@/app/components/SessionSidebar";
 import VoiceInput from "@/app/components/VoiceInput";
+import { deleteSession, getSessionMessages, getSessions, SessionSummary, startNewSession } from "@/app/lib/api";
 
 export default function Home() {
-  const [transcript, setTranscript] = useState("");
-  const [reply, setReply] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [isBusy, setIsBusy] = useState(false);
 
-  const handleResult = useCallback((t: string, r: string) => {
-    setTranscript(t);
-    setReply(r);
+  const refreshSessions = useCallback(async () => {
+    try {
+      setSessions(await getSessions());
+    } catch {
+      // sidebar list is best-effort
+    }
   }, []);
 
+  useEffect(() => {
+    refreshSessions();
+  }, [refreshSessions]);
+
+  const handleResult = useCallback(
+    (transcript: string, reply: string, sessionId: string) => {
+      setMessages((prev) => [
+        ...prev,
+        ...(transcript ? [{ role: "user" as const, content: transcript }] : []),
+        { role: "assistant" as const, content: reply },
+      ]);
+      if (sessionId) {
+        setActiveSessionId(sessionId);
+        refreshSessions();
+      }
+    },
+    [refreshSessions]
+  );
+
+  const handleSelectSession = useCallback(
+    async (sessionId: string) => {
+      if (sessionId === activeSessionId || isBusy) return;
+      try {
+        const history = await getSessionMessages(sessionId);
+        setMessages(history);
+        setActiveSessionId(sessionId);
+      } catch {
+        // ignore — sidebar selection is best-effort
+      }
+    },
+    [activeSessionId, isBusy]
+  );
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      if (isBusy) return;
+      try {
+        await deleteSession(sessionId);
+        if (sessionId === activeSessionId) {
+          const newSessionId = await startNewSession();
+          setMessages([]);
+          setActiveSessionId(newSessionId);
+        }
+        refreshSessions();
+      } catch {
+        // ignore — user can retry
+      }
+    },
+    [activeSessionId, isBusy, refreshSessions]
+  );
+
+  const handleNewSession = useCallback(async () => {
+    if (isBusy) return;
+    try {
+      const sessionId = await startNewSession();
+      setMessages([]);
+      setActiveSessionId(sessionId);
+      refreshSessions();
+    } catch {
+      // ignore — user can retry
+    }
+  }, [refreshSessions, isBusy]);
+
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
-      <h1 className="text-2xl font-semibold">Sarjy</h1>
-      <VoiceInput onResult={handleResult} />
-      {(transcript || reply) && (
-        <div className="w-full max-w-md space-y-2 text-sm">
-          {transcript && <p><span className="font-medium">You:</span> {transcript}</p>}
-          {reply && <p><span className="font-medium">Sarjy:</span> {reply}</p>}
-        </div>
-      )}
+    <div className="flex min-h-screen">
+      <SessionSidebar
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={handleSelectSession}
+        onNewSession={handleNewSession}
+        onDeleteSession={handleDeleteSession}
+        canStartNewSession={sessions.find((session) => session.id === activeSessionId)?.isEmpty === false}
+        disabled={isBusy}
+      />
+      <div className="flex flex-1 flex-col items-center gap-5 overflow-hidden px-8 py-6">
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Sarjy</h1>
+        <ChatWindow messages={messages} />
+        <VoiceInput sessionId={activeSessionId} onResult={handleResult} onBusyChange={setIsBusy} />
+      </div>
     </div>
   );
 }

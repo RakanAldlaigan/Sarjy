@@ -1,6 +1,6 @@
 import base64
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from app.models.chat import ChatResponse, LLMRequest, LLMResponse, TranscriptResponse, TTSRequest
@@ -51,21 +51,27 @@ def text_to_speech(body: TTSRequest):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(audio: UploadFile):
-    session_id, is_new_session = session_service.get_or_create_session()
+async def chat(audio: UploadFile, session_id: str | None = Form(None)):
+    if session_id:
+        session_service.touch_session(session_id)
+    else:
+        session_id = session_service.get_or_create_session()
+
     transcript = ""
     try:
         audio_bytes = await audio.read()
         transcript = deepgram_service.transcribe_audio(audio_bytes)
         message_service.save_message(session_id, "user", transcript)
 
+        history = message_service.get_session_messages(session_id)
+
         system_prompt = SYSTEM_PROMPT
-        if is_new_session:
+        if len(history) == 1:
+            session_service.mark_session_non_empty(session_id)
             memory_context = memory_service.get_memory_context(session_id)
             if memory_context:
                 system_prompt = f"{SYSTEM_PROMPT}\n\n{memory_context}"
 
-        history = message_service.get_session_messages(session_id)
         reply = llm_service.generate_reply([{"role": "system", "content": system_prompt}] + history)
         message_service.save_message(session_id, "assistant", reply)
 
