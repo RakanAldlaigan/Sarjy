@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import ChatWindow, { ChatMessage } from "@/app/components/ChatWindow";
 import SessionSidebar from "@/app/components/SessionSidebar";
+import SignInScreen from "@/app/components/SignInScreen";
 import VoiceInput from "@/app/components/VoiceInput";
+import { useAuth } from "@/app/hooks/useAuth";
 import { deleteSession, getSessionMessages, getSessions, SessionSummary, startNewSession } from "@/app/lib/api";
+import { supabase } from "@/app/lib/supabase";
 
 export default function Home() {
+  const { session, loading } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -21,8 +25,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!session) {
+      setMessages([]);
+      setActiveSessionId(null);
+      setSessions([]);
+      return;
+    }
     refreshSessions();
-  }, [refreshSessions]);
+  }, [session?.user.id, refreshSessions]);
 
   const handleResult = useCallback(
     (transcript: string, reply: string, sessionId: string) => {
@@ -83,6 +93,18 @@ export default function Home() {
     }
   }, [refreshSessions, isBusy]);
 
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white dark:bg-zinc-950">
+        <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading…</p>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <SignInScreen />;
+  }
+
   return (
     <div className="flex min-h-screen">
       <SessionSidebar
@@ -91,7 +113,8 @@ export default function Home() {
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
-        canStartNewSession={sessions.find((session) => session.id === activeSessionId)?.isEmpty === false}
+        onSignOut={() => supabase.auth.signOut()}
+        canStartNewSession={sessions.find((s) => s.id === activeSessionId)?.isEmpty === false}
         disabled={isBusy}
       />
       <div className="flex flex-1 flex-col items-center gap-5 overflow-hidden px-8 py-6">

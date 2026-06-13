@@ -1,8 +1,9 @@
 import base64
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
+from app.core.auth import get_current_user_id
 from app.models.chat import ChatResponse, LLMRequest, LLMResponse, TranscriptResponse, TTSRequest
 from app.prompts.system import SYSTEM_PROMPT
 from app.services import (
@@ -51,11 +52,15 @@ def text_to_speech(body: TTSRequest):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(audio: UploadFile, session_id: str | None = Form(None)):
-    if session_id:
-        session_service.touch_session(session_id)
+async def chat(
+    audio: UploadFile,
+    session_id: str | None = Form(None),
+    user_id: str = Depends(get_current_user_id),
+):
+    if session_id and session_service.touch_session(session_id, user_id):
+        pass
     else:
-        session_id = session_service.get_or_create_session()
+        session_id = session_service.get_or_create_session(user_id)
 
     transcript = ""
     try:
@@ -63,12 +68,12 @@ async def chat(audio: UploadFile, session_id: str | None = Form(None)):
         transcript = deepgram_service.transcribe_audio(audio_bytes)
         message_service.save_message(session_id, "user", transcript)
 
-        history = message_service.get_session_messages(session_id)
+        history = message_service.get_session_messages(session_id, user_id)
 
         system_prompt = SYSTEM_PROMPT
         if len(history) == 1:
-            session_service.mark_session_non_empty(session_id)
-            memory_context = memory_service.get_memory_context(session_id)
+            session_service.mark_session_non_empty(session_id, user_id)
+            memory_context = memory_service.get_memory_context(session_id, user_id)
             if memory_context:
                 system_prompt = f"{SYSTEM_PROMPT}\n\n{memory_context}"
 

@@ -1,3 +1,4 @@
+from app.services import session_service
 from app.services.supabase_service import get_client
 
 
@@ -9,7 +10,10 @@ def save_message(session_id: str, role: str, content: str) -> None:
     }).execute()
 
 
-def get_session_messages(session_id: str) -> list[dict]:
+def get_session_messages(session_id: str, user_id: str) -> list[dict]:
+    if not session_service.session_belongs_to_user(session_id, user_id):
+        return []
+
     result = (
         get_client()
         .table("messages")

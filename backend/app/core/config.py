@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     elevenlabs_voice_id: str = ""
     supabase_url: str = ""
     supabase_anon_key: str = ""
-    google_calendar_client_id: str = ""
-    google_calendar_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
 
 
 settings = Settings()

@@ -1,6 +1,13 @@
 import { ChatMessage } from "@/app/components/ChatWindow";
+import { supabase } from "@/app/lib/supabase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export interface ChatResult {
   transcript: string;
@@ -18,6 +25,7 @@ export async function sendAudioToChat(audioBlob: Blob, sessionId?: string | null
 
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
+    headers: await getAuthHeaders(),
     body: formData,
   });
 
@@ -41,7 +49,7 @@ export interface SessionSummary {
 }
 
 export async function getSessions(): Promise<SessionSummary[]> {
-  const response = await fetch(`${API_BASE_URL}/sessions`);
+  const response = await fetch(`${API_BASE_URL}/sessions`, { headers: await getAuthHeaders() });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch sessions: ${response.status}`);
@@ -58,7 +66,9 @@ export async function getSessions(): Promise<SessionSummary[]> {
 }
 
 export async function getSessionMessages(sessionId: string): Promise<ChatMessage[]> {
-  const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/messages`);
+  const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/messages`, {
+    headers: await getAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch session messages: ${response.status}`);
@@ -68,7 +78,10 @@ export async function getSessionMessages(sessionId: string): Promise<ChatMessage
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}`, { method: "DELETE" });
+  const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: await getAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to delete session: ${response.status}`);
@@ -76,7 +89,10 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 export async function startNewSession(): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/sessions/new`, { method: "POST" });
+  const response = await fetch(`${API_BASE_URL}/sessions/new`, {
+    method: "POST",
+    headers: await getAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to create session: ${response.status}`);

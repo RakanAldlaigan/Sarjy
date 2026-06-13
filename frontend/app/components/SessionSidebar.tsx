@@ -8,6 +8,7 @@ interface SessionSidebarProps {
   onSelectSession: (sessionId: string) => void;
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
+  onSignOut: () => void;
   canStartNewSession: boolean;
   disabled: boolean;
 }
@@ -18,6 +19,7 @@ export default function SessionSidebar({
   onSelectSession,
   onNewSession,
   onDeleteSession,
+  onSignOut,
   canStartNewSession,
   disabled,
 }: SessionSidebarProps) {
@@ -90,6 +92,13 @@ export default function SessionSidebar({
           </div>
         ))}
       </div>
+
+      <button
+        onClick={onSignOut}
+        className="rounded-xl px-3 py-2 text-left text-sm text-zinc-500 transition-colors duration-150 hover:bg-zinc-200 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+      >
+        Sign out
+      </button>
     </aside>
   );
 }
