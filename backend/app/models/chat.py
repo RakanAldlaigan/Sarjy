@@ -18,6 +18,7 @@ class TTSRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    session_id: str
     transcript: str
     reply: str
     audio_base64: str
