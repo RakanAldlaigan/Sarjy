@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useVoiceRecorder } from "@/app/hooks/useVoiceRecorder";
-import { sendAudioToChat } from "@/app/lib/api";
+import { playAudio } from "@/app/lib/audio";
+import { ChatResult, sendAudioToChat } from "@/app/lib/api";
 
 interface VoiceInputProps {
   sessionId: string | null;
-  onResult: (transcript: string, reply: string, sessionId: string) => void;
+  onResult: (result: ChatResult) => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
@@ -25,18 +26,20 @@ export default function VoiceInput({ sessionId, onResult, onBusyChange }: VoiceI
     const process = async () => {
       setIsProcessing(true);
       try {
-        const { transcript, reply, audioBase64, sessionId: returnedSessionId } = await sendAudioToChat(
-          audioBlob,
-          recordingSessionIdRef.current
-        );
-        onResult(transcript, reply, returnedSessionId);
+        const result = await sendAudioToChat(audioBlob, recordingSessionIdRef.current);
+        onResult(result);
 
-        if (audioBase64) {
-          const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`);
-          await audio.play();
+        if (result.audioBase64) {
+          await playAudio(result.audioBase64);
         }
       } catch {
-        onResult("", "Sorry, something went wrong. Please try again.", recordingSessionIdRef.current ?? "");
+        onResult({
+          transcript: "",
+          reply: "Sorry, something went wrong. Please try again.",
+          audioBase64: "",
+          sessionId: recordingSessionIdRef.current ?? "",
+          pendingAction: null,
+        });
       } finally {
         setIsProcessing(false);
       }

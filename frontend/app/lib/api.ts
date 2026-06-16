@@ -9,11 +9,33 @@ async function getAuthHeaders(): Promise<HeadersInit> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+export interface PendingAction {
+  actionType: string;
+  summary: string;
+  conflictWarning: string | null;
+}
+
+interface PendingActionPayload {
+  action_type: string;
+  summary: string;
+  conflict_warning: string | null;
+}
+
+function mapPendingAction(payload?: PendingActionPayload | null): PendingAction | null {
+  if (!payload) return null;
+  return {
+    actionType: payload.action_type,
+    summary: payload.summary,
+    conflictWarning: payload.conflict_warning,
+  };
+}
+
 export interface ChatResult {
   transcript: string;
   reply: string;
   audioBase64: string;
   sessionId: string;
+  pendingAction: PendingAction | null;
 }
 
 export async function sendAudioToChat(audioBlob: Blob, sessionId?: string | null): Promise<ChatResult> {
@@ -22,6 +44,7 @@ export async function sendAudioToChat(audioBlob: Blob, sessionId?: string | null
   if (sessionId) {
     formData.append("session_id", sessionId);
   }
+  formData.append("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone);
 
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
@@ -39,7 +62,75 @@ export async function sendAudioToChat(audioBlob: Blob, sessionId?: string | null
     reply: data.reply,
     audioBase64: data.audio_base64,
     sessionId: data.session_id,
+    pendingAction: mapPendingAction(data.pending_action),
   };
+}
+
+export async function sendPendingAction(sessionId: string, action: "confirm" | "cancel"): Promise<ChatResult> {
+  const response = await fetch(`${API_BASE_URL}/chat/pending-action`, {
+    method: "POST",
+    headers: { ...(await getAuthHeaders()), "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, action }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to send pending action: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return {
+    transcript: data.transcript,
+    reply: data.reply,
+    audioBase64: data.audio_base64,
+    sessionId: data.session_id,
+    pendingAction: mapPendingAction(data.pending_action),
+  };
+}
+
+export async function getPendingAction(sessionId: string): Promise<PendingAction | null> {
+  const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/pending-action`, {
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch pending action: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return mapPendingAction(data);
+}
+
+export async function getCalendarStatus(): Promise<boolean> {
+  const response = await fetch(`${API_BASE_URL}/calendar/status`, { headers: await getAuthHeaders() });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch calendar status: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.connected;
+}
+
+export async function getCalendarConnectUrl(): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}/calendar/connect`, { headers: await getAuthHeaders() });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get calendar connect URL: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.authorization_url;
+}
+
+export async function disconnectCalendar(): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/calendar/disconnect`, {
+    method: "DELETE",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to disconnect calendar: ${response.status}`);
+  }
 }
 
 export interface SessionSummary {

@@ -1,20 +1,51 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import CalendarConnect from "@/app/components/CalendarConnect";
 import ChatWindow, { ChatMessage } from "@/app/components/ChatWindow";
+import PendingActionCard from "@/app/components/PendingActionCard";
 import SessionSidebar from "@/app/components/SessionSidebar";
 import SignInScreen from "@/app/components/SignInScreen";
 import VoiceInput from "@/app/components/VoiceInput";
 import { useAuth } from "@/app/hooks/useAuth";
-import { deleteSession, getSessionMessages, getSessions, SessionSummary, startNewSession } from "@/app/lib/api";
+import {
+  ChatResult,
+  deleteSession,
+  getPendingAction,
+  getSessionMessages,
+  getSessions,
+  PendingAction,
+  SessionSummary,
+  startNewSession,
+} from "@/app/lib/api";
 import { supabase } from "@/app/lib/supabase";
 
 export default function Home() {
   const { session, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white dark:bg-zinc-950">
+        <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading…</p>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <SignInScreen />;
+  }
+
+  // Keying by user id remounts the app on sign-in/out and user switch, so all
+  // session state resets cleanly via unmount rather than a reset effect.
+  return <SarjyApp key={session.user.id} />;
+}
+
+function SarjyApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [isBusy, setIsBusy] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -25,29 +56,64 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!session) {
-      setMessages([]);
-      setActiveSessionId(null);
-      setSessions([]);
-      return;
-    }
-    refreshSessions();
-  }, [session?.user.id, refreshSessions]);
+    // On mount, resume the most recent session and re-render its pending-action card
+    // if one is still live (the backend silently clears expired ones).
+    let cancelled = false;
+    (async () => {
+      let list: SessionSummary[];
+      try {
+        list = await getSessions();
+      } catch {
+        return;
+      }
+      if (cancelled) return;
+      setSessions(list);
+
+      const mostRecent = list[0];
+      if (!mostRecent) return;
+      try {
+        const history = await getSessionMessages(mostRecent.id);
+        if (cancelled) return;
+        setMessages(history);
+        setActiveSessionId(mostRecent.id);
+      } catch {
+        return;
+      }
+      try {
+        const pending = await getPendingAction(mostRecent.id);
+        if (!cancelled) setPendingAction(pending);
+      } catch {
+        // pending-action is best-effort; messages already loaded
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleResult = useCallback(
-    (transcript: string, reply: string, sessionId: string) => {
+    (result: ChatResult) => {
       setMessages((prev) => [
         ...prev,
-        ...(transcript ? [{ role: "user" as const, content: transcript }] : []),
-        { role: "assistant" as const, content: reply },
+        ...(result.transcript ? [{ role: "user" as const, content: result.transcript }] : []),
+        { role: "assistant" as const, content: result.reply },
       ]);
-      if (sessionId) {
-        setActiveSessionId(sessionId);
+      // Only replace the card when this turn produced its own pending action; an
+      // unrelated turn (null) leaves the existing one intact.
+      setPendingAction((prev) => result.pendingAction ?? prev);
+      if (result.sessionId) {
+        setActiveSessionId(result.sessionId);
         refreshSessions();
       }
     },
     [refreshSessions]
   );
+
+  const handlePendingActionResolved = useCallback((reply: string) => {
+    setMessages((prev) => [...prev, { role: "assistant" as const, content: reply }]);
+    setPendingAction(null);
+  }, []);
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
@@ -56,8 +122,18 @@ export default function Home() {
         const history = await getSessionMessages(sessionId);
         setMessages(history);
         setActiveSessionId(sessionId);
+        // The pending action lives server-side per session: drop the card for the
+        // session we're leaving, then re-fetch it for the one we're opening so it
+        // reappears on return. It's only ever cleared by an explicit confirm/cancel.
+        setPendingAction(null);
       } catch {
         // ignore — sidebar selection is best-effort
+        return;
+      }
+      try {
+        setPendingAction(await getPendingAction(sessionId));
+      } catch {
+        // pending-action is best-effort
       }
     },
     [activeSessionId, isBusy]
@@ -72,6 +148,7 @@ export default function Home() {
           const newSessionId = await startNewSession();
           setMessages([]);
           setActiveSessionId(newSessionId);
+          setPendingAction(null);
         }
         refreshSessions();
       } catch {
@@ -87,23 +164,12 @@ export default function Home() {
       const sessionId = await startNewSession();
       setMessages([]);
       setActiveSessionId(sessionId);
+      setPendingAction(null);
       refreshSessions();
     } catch {
       // ignore — user can retry
     }
   }, [refreshSessions, isBusy]);
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white dark:bg-zinc-950">
-        <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading…</p>
-      </div>
-    );
-  }
-
-  if (!session) {
-    return <SignInScreen />;
-  }
 
   return (
     <div className="flex min-h-screen">
@@ -118,8 +184,18 @@ export default function Home() {
         disabled={isBusy}
       />
       <div className="flex flex-1 flex-col items-center gap-5 overflow-hidden px-8 py-6">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Sarjy</h1>
+        <div className="flex w-full max-w-2xl items-center justify-between">
+          <h1 className="text-xl font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Sarjy</h1>
+          <CalendarConnect />
+        </div>
         <ChatWindow messages={messages} />
+        {pendingAction && activeSessionId && (
+          <PendingActionCard
+            sessionId={activeSessionId}
+            pendingAction={pendingAction}
+            onResolved={handlePendingActionResolved}
+          />
+        )}
         <VoiceInput sessionId={activeSessionId} onResult={handleResult} onBusyChange={setIsBusy} />
       </div>
     </div>
