@@ -133,6 +133,16 @@ export async function disconnectCalendar(): Promise<void> {
   }
 }
 
+export interface NoteSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+}
+
+export interface NoteDetail extends NoteSummary {
+  content: string;
+}
+
 export interface SessionSummary {
   id: string;
   preview: string;
@@ -176,6 +186,48 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
   if (!response.ok) {
     throw new Error(`Failed to delete session: ${response.status}`);
+  }
+}
+
+export async function getNotes(): Promise<NoteSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/notes`, { headers: await getAuthHeaders() });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch notes: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.map((note: { id: string; title: string; created_at: string }) => ({
+    id: note.id,
+    title: note.title,
+    createdAt: note.created_at,
+  }));
+}
+
+export async function getNote(noteId: string): Promise<NoteDetail> {
+  const response = await fetch(`${API_BASE_URL}/notes/${noteId}`, { headers: await getAuthHeaders() });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch note: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return {
+    id: data.id,
+    title: data.title,
+    content: data.content,
+    createdAt: data.created_at,
+  };
+}
+
+export async function deleteNote(noteId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/notes/${noteId}`, {
+    method: "DELETE",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete note: ${response.status}`);
   }
 }
 

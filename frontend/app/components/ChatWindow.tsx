@@ -20,7 +20,7 @@ export default function ChatWindow({ messages }: ChatWindowProps) {
 
   if (messages.length === 0) {
     return (
-      <div className="flex h-full w-full max-w-2xl flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-zinc-200 px-6 text-center dark:border-zinc-800">
+      <div className="flex h-full min-h-0 w-full max-w-2xl flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-zinc-200 px-6 text-center dark:border-zinc-800">
         <p className="text-base font-medium text-zinc-600 dark:text-zinc-300">
           Ready when you are
         </p>
@@ -32,7 +32,7 @@ export default function ChatWindow({ messages }: ChatWindowProps) {
   }
 
   return (
-    <div className="flex h-full w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50/50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
+    <div className="flex h-full min-h-0 w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50/50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
       {messages.map((message, index) => (
         <div
           key={index}

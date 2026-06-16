@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import CalendarConnect from "@/app/components/CalendarConnect";
 import ChatWindow, { ChatMessage } from "@/app/components/ChatWindow";
+import NoteView from "@/app/components/NoteView";
 import PendingActionCard from "@/app/components/PendingActionCard";
 import SessionSidebar from "@/app/components/SessionSidebar";
 import SignInScreen from "@/app/components/SignInScreen";
@@ -10,10 +11,15 @@ import VoiceInput from "@/app/components/VoiceInput";
 import { useAuth } from "@/app/hooks/useAuth";
 import {
   ChatResult,
+  deleteNote,
   deleteSession,
+  getNote,
+  getNotes,
   getPendingAction,
   getSessionMessages,
   getSessions,
+  NoteDetail,
+  NoteSummary,
   PendingAction,
   SessionSummary,
   startNewSession,
@@ -46,12 +52,22 @@ function SarjyApp() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [isBusy, setIsBusy] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
+  const [activeNote, setActiveNote] = useState<NoteDetail | null>(null);
 
   const refreshSessions = useCallback(async () => {
     try {
       setSessions(await getSessions());
     } catch {
       // sidebar list is best-effort
+    }
+  }, []);
+
+  const refreshNotes = useCallback(async () => {
+    try {
+      setNotes(await getNotes());
+    } catch {
+      // notes list is best-effort
     }
   }, []);
 
@@ -92,6 +108,10 @@ function SarjyApp() {
     };
   }, []);
 
+  useEffect(() => {
+    refreshNotes();
+  }, [refreshNotes]);
+
   const handleResult = useCallback(
     (result: ChatResult) => {
       setMessages((prev) => [
@@ -106,8 +126,10 @@ function SarjyApp() {
         setActiveSessionId(result.sessionId);
         refreshSessions();
       }
+      // A turn may have saved a note via the save_note tool — refresh the list.
+      refreshNotes();
     },
-    [refreshSessions]
+    [refreshSessions, refreshNotes]
   );
 
   const handlePendingActionResolved = useCallback((reply: string) => {
@@ -115,9 +137,38 @@ function SarjyApp() {
     setPendingAction(null);
   }, []);
 
+  const handleSelectNote = useCallback(
+    async (noteId: string) => {
+      if (isBusy) return;
+      try {
+        setActiveNote(await getNote(noteId));
+      } catch {
+        // ignore — note selection is best-effort
+      }
+    },
+    [isBusy]
+  );
+
+  const handleCloseNote = useCallback(() => setActiveNote(null), []);
+
+  const handleDeleteNote = useCallback(
+    async (noteId: string) => {
+      try {
+        await deleteNote(noteId);
+        setActiveNote((current) => (current?.id === noteId ? null : current));
+        refreshNotes();
+      } catch {
+        // ignore — user can retry
+      }
+    },
+    [refreshNotes]
+  );
+
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
-      if (sessionId === activeSessionId || isBusy) return;
+      if (isBusy) return;
+      setActiveNote(null);
+      if (sessionId === activeSessionId) return;
       try {
         const history = await getSessionMessages(sessionId);
         setMessages(history);
@@ -149,6 +200,7 @@ function SarjyApp() {
           setMessages([]);
           setActiveSessionId(newSessionId);
           setPendingAction(null);
+          setActiveNote(null);
         }
         refreshSessions();
       } catch {
@@ -165,6 +217,7 @@ function SarjyApp() {
       setMessages([]);
       setActiveSessionId(sessionId);
       setPendingAction(null);
+      setActiveNote(null);
       refreshSessions();
     } catch {
       // ignore — user can retry
@@ -172,13 +225,16 @@ function SarjyApp() {
   }, [refreshSessions, isBusy]);
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       <SessionSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
+        notes={notes}
+        activeNoteId={activeNote?.id ?? null}
+        onSelectNote={handleSelectNote}
         onSignOut={() => supabase.auth.signOut()}
         canStartNewSession={sessions.find((s) => s.id === activeSessionId)?.isEmpty === false}
         disabled={isBusy}
@@ -188,15 +244,21 @@ function SarjyApp() {
           <h1 className="text-xl font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Sarjy</h1>
           <CalendarConnect />
         </div>
-        <ChatWindow messages={messages} />
-        {pendingAction && activeSessionId && (
-          <PendingActionCard
-            sessionId={activeSessionId}
-            pendingAction={pendingAction}
-            onResolved={handlePendingActionResolved}
-          />
+        {activeNote ? (
+          <NoteView note={activeNote} onClose={handleCloseNote} onDelete={handleDeleteNote} />
+        ) : (
+          <>
+            <ChatWindow messages={messages} />
+            {pendingAction && activeSessionId && (
+              <PendingActionCard
+                sessionId={activeSessionId}
+                pendingAction={pendingAction}
+                onResolved={handlePendingActionResolved}
+              />
+            )}
+            <VoiceInput sessionId={activeSessionId} onResult={handleResult} onBusyChange={setIsBusy} />
+          </>
         )}
-        <VoiceInput sessionId={activeSessionId} onResult={handleResult} onBusyChange={setIsBusy} />
       </div>
     </div>
   );
