@@ -39,6 +39,16 @@ class NewSessionResponse(BaseModel):
     session_id: str
 
 
+class NoteSummary(BaseModel):
+    id: str
+    title: str
+    created_at: str
+
+
+class NoteDetail(NoteSummary):
+    content: str
+
+
 class ConnectCalendarResponse(BaseModel):
     authorization_url: str
 

@@ -132,3 +132,17 @@ create policy "users manage own preferences" on user_preferences
     for all
     using (user_id = auth.uid())
     with check (user_id = auth.uid());
+
+-- notes: scope to user directly, add a display title, a kind ('note' | 'message_draft'),
+-- and an update timestamp
+alter table notes
+    add column user_id uuid not null references auth.users(id) on delete cascade,
+    add column title text not null default '',
+    add column kind text not null default 'note',
+    add column updated_at timestamptz not null default now();
+
+alter table notes enable row level security;
+create policy "users manage own notes" on notes
+    for all
+    using (user_id = auth.uid())
+    with check (user_id = auth.uid());

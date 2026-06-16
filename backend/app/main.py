@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import calendar, health, sessions, voice
+from app.routes import calendar, health, notes, sessions, voice
 
 app = FastAPI(title="Sarjy API")
 
@@ -16,3 +16,4 @@ app.include_router(health.router)
 app.include_router(voice.router)
 app.include_router(sessions.router)
 app.include_router(calendar.router)
+app.include_router(notes.router)

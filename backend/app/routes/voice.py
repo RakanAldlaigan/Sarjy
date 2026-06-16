@@ -11,6 +11,7 @@ from app.models.chat import (
     PendingActionView,
 )
 from app.prompts.calendar import build_calendar_prompt
+from app.prompts.notes import NOTES_PROMPT
 from app.prompts.system import SYSTEM_PROMPT
 from app.services import (
     assistant_tools,
@@ -62,6 +63,7 @@ async def chat(
         timezone_name = assistant_tools.get_effective_timezone(user_id, timezone)
         pending_action = session_service.get_pending_action(session_id, user_id)
         system_prompt = f"{system_prompt}\n\n{build_calendar_prompt(datetime.now(UTC), timezone_name, pending_action)}"
+        system_prompt = f"{system_prompt}\n\n{NOTES_PROMPT}"
 
         tools = assistant_tools.get_available_tools(pending_action)
         messages = [{"role": "system", "content": system_prompt}] + history
@@ -77,7 +79,7 @@ async def chat(
                 break
 
             execution = assistant_tools.execute_tool(
-                model_response["name"], model_response["args"], user_id, timezone_name, pending_action
+                model_response["name"], model_response["args"], user_id, timezone_name, pending_action, session_id
             )
 
             messages.append({"role": "tool_call", "name": model_response["name"], "args": model_response["args"]})

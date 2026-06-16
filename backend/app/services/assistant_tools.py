@@ -5,7 +5,8 @@ from zoneinfo import ZoneInfo
 from google.genai import types
 
 from app.prompts import calendar as calendar_prompts
-from app.services import calendar_service, preferences_service, reminder_service
+from app.prompts import notes as note_prompts
+from app.services import calendar_service, note_service, preferences_service, reminder_service
 
 # Window for a title-only resolution ("the dentist thing") when no date is given,
 # and the cap on how many candidates to read back when a reference is ambiguous.
@@ -42,15 +43,30 @@ def get_effective_timezone(user_id: str, browser_timezone: str | None) -> str:
 
 def get_available_tools(pending_action: dict | None) -> list[types.Tool]:
     declarations = list(calendar_prompts.BASE_FUNCTION_DECLARATIONS)
-    if pending_action and not pending_action.get("requires_ui_confirmation"):
-        declarations = declarations + [
-            calendar_prompts.CONFIRM_PENDING_ACTION,
-            calendar_prompts.CANCEL_PENDING_ACTION,
-        ]
+    if pending_action:
+        # While an action is awaiting confirmation, keep the focus on resolving it: offer the
+        # voice confirm/cancel tools (UI-card actions are confirmed on screen) and don't open
+        # an unrelated note-capture path.
+        if not pending_action.get("requires_ui_confirmation"):
+            declarations = declarations + [
+                calendar_prompts.CONFIRM_PENDING_ACTION,
+                calendar_prompts.CANCEL_PENDING_ACTION,
+            ]
+    else:
+        declarations = declarations + list(note_prompts.NOTE_FUNCTION_DECLARATIONS)
     return [types.Tool(function_declarations=declarations)]
 
 
-def execute_tool(tool_name: str, args: dict, user_id: str, timezone_name: str, pending_action: dict | None) -> ToolExecution:
+def execute_tool(
+    tool_name: str,
+    args: dict,
+    user_id: str,
+    timezone_name: str,
+    pending_action: dict | None,
+    session_id: str | None = None,
+) -> ToolExecution:
+    if tool_name == "save_note":
+        return _handle_save_note(user_id, args, session_id)
     if tool_name == "get_calendar_events":
         return _handle_get_events(user_id, args, timezone_name)
     if tool_name == "create_calendar_event":
@@ -474,6 +490,25 @@ def _handle_cancel(pending_action: dict | None) -> ToolExecution:
     if pending_action is None:
         return ToolExecution(result={"status": "no_pending_action"})
     return ToolExecution(result=cancel_action(), clear_pending=True)
+
+
+def _handle_save_note(user_id: str, args: dict, session_id: str | None) -> ToolExecution:
+    content = (args.get("content") or "").strip()
+    if not content:
+        return ToolExecution(result={"status": "missing_info", "missing": ["content"]})
+
+    title = (args.get("title") or "").strip() or _derive_title(content)
+    note = note_service.create_note(user_id, content=content, title=title, session_id=session_id)
+    return ToolExecution(result={"status": "ok", "title": note["title"]})
+
+
+def _derive_title(content: str, max_length: int = 60) -> str:
+    """Fallback title from the note's first line when the model didn't supply one."""
+    first_line = content.strip().splitlines()[0]
+    words = " ".join(first_line.split()[:6])
+    if len(words) <= max_length:
+        return words
+    return words[: max_length - 3].rstrip() + "..."
 
 
 # --- resolution & formatting helpers -----------------------------------------
