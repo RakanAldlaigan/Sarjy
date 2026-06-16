@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.auth import get_current_user_id
-from app.models.chat import NewSessionResponse, SessionMessage, SessionSummary
+from app.models.chat import NewSessionResponse, PendingActionView, SessionMessage, SessionSummary
 from app.services import message_service, session_service
 
 router = APIRouter()
@@ -38,3 +38,22 @@ def new_session(user_id: str = Depends(get_current_user_id)):
         return NewSessionResponse(session_id=session_id)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to create session: {e}")
+
+
+@router.get("/sessions/{session_id}/pending-action", response_model=PendingActionView | None)
+def get_session_pending_action(session_id: str, user_id: str = Depends(get_current_user_id)):
+    """Returns the live UI-confirmation card for a session, if any (expired actions are
+    cleared silently by get_pending_action). Voice-confirmed actions have no card, so None."""
+    try:
+        pending_action = session_service.get_pending_action(session_id, user_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch pending action: {e}")
+
+    if not pending_action or not pending_action.get("requires_ui_confirmation"):
+        return None
+
+    return PendingActionView(
+        action_type=pending_action["action_type"],
+        summary=pending_action.get("summary", ""),
+        conflict_warning=pending_action.get("conflict_warning"),
+    )

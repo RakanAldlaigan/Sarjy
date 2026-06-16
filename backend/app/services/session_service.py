@@ -111,6 +111,47 @@ def get_user_session_ids(user_id: str) -> list[str]:
     return [session["id"] for session in result.data]
 
 
+def get_pending_action(session_id: str, user_id: str) -> dict | None:
+    result = (
+        get_client()
+        .table("sessions")
+        .select("pending_action, pending_action_expires_at")
+        .eq("id", session_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
+
+    row = result.data[0]
+    pending_action = row["pending_action"]
+    if not pending_action:
+        return None
+
+    expires_at = row["pending_action_expires_at"]
+    if expires_at and datetime.fromisoformat(expires_at) < datetime.now(timezone.utc):
+        clear_pending_action(session_id, user_id)
+        return None
+
+    return pending_action
+
+
+def set_pending_action(session_id: str, user_id: str, pending_action: dict, ttl_minutes: int = 5) -> None:
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
+    get_client().table("sessions").update({
+        "pending_action": pending_action,
+        "pending_action_expires_at": expires_at.isoformat(),
+    }).eq("id", session_id).eq("user_id", user_id).execute()
+
+
+def clear_pending_action(session_id: str, user_id: str) -> None:
+    get_client().table("sessions").update({
+        "pending_action": None,
+        "pending_action_expires_at": None,
+    }).eq("id", session_id).eq("user_id", user_id).execute()
+
+
 def list_sessions(user_id: str) -> list[dict]:
     client = get_client()
 
