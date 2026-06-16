@@ -64,13 +64,13 @@ export default function CalendarConnect() {
   }
 
   return (
-    <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
-      {notice && <span>{notice}</span>}
+    <div className="flex flex-col gap-1">
+      {notice && <span className="px-1 text-xs text-zinc-400 dark:text-zinc-500">{notice}</span>}
       {connected ? (
         <button
           onClick={handleDisconnect}
           disabled={busy}
-          className="transition-colors duration-150 hover:text-zinc-600 hover:underline disabled:opacity-50 dark:hover:text-zinc-300"
+          className="rounded-xl bg-red-500/10 px-3 py-2 text-sm font-medium text-red-600 transition-colors duration-150 hover:bg-red-500/20 disabled:opacity-50 dark:text-red-400"
         >
           Calendar connected · Disconnect
         </button>
@@ -78,7 +78,7 @@ export default function CalendarConnect() {
         <button
           onClick={handleConnect}
           disabled={busy}
-          className="transition-colors duration-150 hover:text-zinc-600 hover:underline disabled:opacity-50 dark:hover:text-zinc-300"
+          className="rounded-xl bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-600 transition-colors duration-150 hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400"
         >
           Connect Google Calendar
         </button>

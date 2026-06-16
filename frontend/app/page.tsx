@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import CalendarConnect from "@/app/components/CalendarConnect";
 import ChatWindow, { ChatMessage } from "@/app/components/ChatWindow";
 import NoteView from "@/app/components/NoteView";
 import PendingActionCard from "@/app/components/PendingActionCard";
@@ -240,9 +239,8 @@ function SarjyApp() {
         disabled={isBusy}
       />
       <div className="flex flex-1 flex-col items-center gap-5 overflow-hidden px-8 py-6">
-        <div className="flex w-full max-w-2xl items-center justify-between">
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Sarjy</h1>
-          <CalendarConnect />
+        <div className="flex w-full max-w-2xl items-center justify-center">
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Sarjy</h1>
         </div>
         {activeNote ? (
           <NoteView note={activeNote} onClose={handleCloseNote} onDelete={handleDeleteNote} />

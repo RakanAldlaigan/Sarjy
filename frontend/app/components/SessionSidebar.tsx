@@ -1,5 +1,6 @@
 "use client";
 
+import CalendarConnect from "@/app/components/CalendarConnect";
 import { NoteSummary, SessionSummary } from "@/app/lib/api";
 
 interface SessionSidebarProps {
@@ -32,7 +33,7 @@ export default function SessionSidebar({
   const newSessionEnabled = canStartNewSession && !disabled;
 
   return (
-    <aside className="flex h-screen w-64 flex-col gap-4 border-r border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
+    <aside className="flex h-screen w-64 flex-col gap-4 border-r border-zinc-200 bg-zinc-50 p-4 pt-6 dark:border-zinc-800 dark:bg-zinc-950">
       <button
         onClick={onNewSession}
         disabled={!newSessionEnabled}
@@ -123,9 +124,11 @@ export default function SessionSidebar({
         </section>
       </div>
 
+      <CalendarConnect />
+
       <button
         onClick={onSignOut}
-        className="rounded-xl px-3 py-2 text-left text-sm text-zinc-500 transition-colors duration-150 hover:bg-zinc-200 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        className="rounded-xl bg-red-500/10 px-3 py-2 text-sm font-medium text-red-600 transition-colors duration-150 hover:bg-red-500/20 dark:text-red-400"
       >
         Sign out
       </button>
