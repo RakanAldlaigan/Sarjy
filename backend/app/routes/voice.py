@@ -2,18 +2,13 @@ import base64
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Form, UploadFile
 
 from app.core.auth import get_current_user_id
 from app.models.chat import (
     ChatResponse,
-    LLMRequest,
-    LLMResponse,
     PendingActionRequest,
     PendingActionView,
-    TranscriptResponse,
-    TTSRequest,
 )
 from app.prompts.calendar import build_calendar_prompt
 from app.prompts.system import SYSTEM_PROMPT
@@ -34,37 +29,6 @@ router = APIRouter()
 FALLBACK_TEXT = "Sorry, something went wrong. Please try again."
 
 MAX_TOOL_ROUNDS = 4
-
-
-@router.post("/stt", response_model=TranscriptResponse)
-async def speech_to_text(audio: UploadFile):
-    try:
-        audio_bytes = await audio.read()
-        transcript = deepgram_service.transcribe_audio(audio_bytes)
-        return TranscriptResponse(transcript=transcript)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Speech-to-text failed: {e}")
-
-
-@router.post("/llm", response_model=LLMResponse)
-def chat_with_llm(body: LLMRequest):
-    try:
-        reply = llm_service.generate_reply([
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": body.transcript},
-        ])
-        return LLMResponse(reply=reply)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
-
-
-@router.post("/tts")
-def text_to_speech(body: TTSRequest):
-    try:
-        audio_bytes = elevenlabs_service.synthesize_speech(body.text)
-        return Response(content=audio_bytes, media_type="audio/mpeg")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Text-to-speech failed: {e}")
 
 
 @router.post("/chat", response_model=ChatResponse)

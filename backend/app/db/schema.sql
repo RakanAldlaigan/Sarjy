@@ -22,15 +22,6 @@ create table notes (
     created_at timestamptz not null default now()
 );
 
-create table tasks (
-    id uuid primary key default gen_random_uuid(),
-    session_id uuid references sessions(id) on delete set null,
-    description text not null,
-    is_complete boolean not null default false,
-    due_at timestamptz,
-    created_at timestamptz not null default now()
-);
-
 create table reminders (
     id uuid primary key default gen_random_uuid(),
     session_id uuid references sessions(id) on delete set null,
@@ -93,7 +84,6 @@ grant select, insert, update, delete on public.messages to service_role;
 grant select, insert, update, delete on public.reminders to service_role;
 grant select, insert, update, delete on public.user_preferences to service_role;
 grant select, insert, update, delete on public.notes to service_role;
-grant select, insert, update, delete on public.tasks to service_role;
 alter default privileges in schema public
     grant select, insert, update, delete on tables to service_role;
 

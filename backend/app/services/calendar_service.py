@@ -55,15 +55,6 @@ def _event_to_dict(event: dict) -> dict:
     }
 
 
-def list_upcoming_events(
-    user_id: str,
-    max_results: int = 10,
-    time_min: datetime | None = None,
-    time_max: datetime | None = None,
-) -> list[dict]:
-    return find_events(user_id, time_min=time_min or datetime.now(timezone.utc), time_max=time_max, max_results=max_results)
-
-
 def find_events(
     user_id: str,
     query: str | None = None,
@@ -93,17 +84,6 @@ def find_events(
         raise CalendarAPIError(str(e)) from e
 
     return [_event_to_dict(e) for e in result.get("items", [])]
-
-
-def get_event(user_id: str, event_id: str, calendar_id: str = PRIMARY_CALENDAR_ID) -> dict | None:
-    service = _get_service(user_id)
-    try:
-        event = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
-    except HttpError as e:
-        if e.resp.status == 404:
-            return None
-        raise CalendarAPIError(str(e)) from e
-    return _event_to_dict(event)
 
 
 def detect_conflicts(

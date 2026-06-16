@@ -3,22 +3,6 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-class TranscriptResponse(BaseModel):
-    transcript: str
-
-
-class LLMRequest(BaseModel):
-    transcript: str
-
-
-class LLMResponse(BaseModel):
-    reply: str
-
-
-class TTSRequest(BaseModel):
-    text: str
-
-
 class PendingActionView(BaseModel):
     action_type: str
     summary: str
