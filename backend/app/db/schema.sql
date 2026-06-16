@@ -69,6 +69,12 @@ alter table sessions
     add column pending_action jsonb,
     add column pending_action_expires_at timestamptz;
 
+-- sessions: holds the in-flight structured-note draft (content gathered so far,
+-- format, and how many clarifying questions have been asked). Separate from
+-- pending_action because note tools stay available while a draft is in progress.
+alter table sessions
+    add column note_draft jsonb;
+
 -- ── Service role + Row-Level Security ────────────────────────────────────────
 -- The backend connects as service_role (bypasses RLS); RLS is the safety net
 -- against the public anon key shipped in the frontend bundle. Each user-data

@@ -1,4 +1,8 @@
+import re
+
 from app.services.supabase_service import get_client
+
+SEARCH_MAX_RESULTS = 3
 
 
 def create_note(
@@ -33,6 +37,24 @@ def list_notes(user_id: str) -> list[dict]:
         .execute()
         .data
     )
+
+
+def search_notes(user_id: str, query: str | None = None, max_results: int = SEARCH_MAX_RESULTS) -> list[dict]:
+    db_query = (
+        get_client()
+        .table("notes")
+        .select("id, title, content, created_at")
+        .eq("user_id", user_id)
+    )
+
+    # Match any meaningful word against either the title or the content (same word-based
+    # ilike approach as reminder_service.find_reminders).
+    words = [w for w in re.findall(r"\w+", query) if len(w) > 2] if query else []
+    if words:
+        conditions = [f"title.ilike.%{w}%" for w in words] + [f"content.ilike.%{w}%" for w in words]
+        db_query = db_query.or_(",".join(conditions))
+
+    return db_query.order("created_at", desc=True).limit(max_results).execute().data
 
 
 def get_note(note_id: str, user_id: str) -> dict | None:

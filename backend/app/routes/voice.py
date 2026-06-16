@@ -11,7 +11,7 @@ from app.models.chat import (
     PendingActionView,
 )
 from app.prompts.calendar import build_calendar_prompt
-from app.prompts.notes import NOTES_PROMPT
+from app.prompts.notes import build_notes_prompt
 from app.prompts.system import SYSTEM_PROMPT
 from app.services import (
     assistant_tools,
@@ -62,14 +62,16 @@ async def chat(
 
         timezone_name = assistant_tools.get_effective_timezone(user_id, timezone)
         pending_action = session_service.get_pending_action(session_id, user_id)
+        note_draft = session_service.get_note_draft(session_id, user_id)
         system_prompt = f"{system_prompt}\n\n{build_calendar_prompt(datetime.now(UTC), timezone_name, pending_action)}"
-        system_prompt = f"{system_prompt}\n\n{NOTES_PROMPT}"
+        system_prompt = f"{system_prompt}\n\n{build_notes_prompt(note_draft)}"
 
         tools = assistant_tools.get_available_tools(pending_action)
         messages = [{"role": "system", "content": system_prompt}] + history
 
         reply = None
         pending_action_changed = False
+        note_draft_changed = False
 
         for _ in range(MAX_TOOL_ROUNDS):
             model_response = llm_service.generate_with_tools(messages, tools)
@@ -79,7 +81,8 @@ async def chat(
                 break
 
             execution = assistant_tools.execute_tool(
-                model_response["name"], model_response["args"], user_id, timezone_name, pending_action, session_id
+                model_response["name"], model_response["args"], user_id, timezone_name, pending_action,
+                session_id, note_draft,
             )
 
             messages.append({"role": "tool_call", "name": model_response["name"], "args": model_response["args"]})
@@ -94,6 +97,13 @@ async def chat(
                 pending_action = None
                 pending_action_changed = True
 
+            if execution.note_draft is not None:
+                note_draft = execution.note_draft
+                note_draft_changed = True
+            if execution.clear_note_draft:
+                note_draft = None
+                note_draft_changed = True
+
             tools = assistant_tools.get_available_tools(pending_action)
         else:
             reply = FALLBACK_TEXT
@@ -103,6 +113,12 @@ async def chat(
                 session_service.clear_pending_action(session_id, user_id)
             else:
                 session_service.set_pending_action(session_id, user_id, pending_action)
+
+        if note_draft_changed:
+            if note_draft is None:
+                session_service.clear_note_draft(session_id, user_id)
+            else:
+                session_service.set_note_draft(session_id, user_id, note_draft)
 
         message_service.save_message(session_id, "assistant", reply)
         audio_reply = elevenlabs_service.synthesize_speech(reply)

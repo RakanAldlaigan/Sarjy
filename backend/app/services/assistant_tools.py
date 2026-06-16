@@ -20,6 +20,8 @@ class ToolExecution:
     pending_action: dict | None = None
     clear_pending: bool = False
     ui_confirmation: dict | None = None
+    note_draft: dict | None = None
+    clear_note_draft: bool = False
 
 
 def get_effective_timezone(user_id: str, browser_timezone: str | None) -> str:
@@ -64,9 +66,18 @@ def execute_tool(
     timezone_name: str,
     pending_action: dict | None,
     session_id: str | None = None,
+    note_draft: dict | None = None,
 ) -> ToolExecution:
     if tool_name == "save_note":
         return _handle_save_note(user_id, args, session_id)
+    if tool_name == "search_notes":
+        return _handle_search_notes(user_id, args)
+    if tool_name == "draft_structured_note":
+        return _handle_draft_structured_note(args, note_draft)
+    if tool_name == "finalize_structured_note":
+        return _handle_finalize_structured_note(user_id, args, session_id)
+    if tool_name == "discard_structured_note":
+        return _handle_discard_structured_note(note_draft)
     if tool_name == "get_calendar_events":
         return _handle_get_events(user_id, args, timezone_name)
     if tool_name == "create_calendar_event":
@@ -500,6 +511,48 @@ def _handle_save_note(user_id: str, args: dict, session_id: str | None) -> ToolE
     title = (args.get("title") or "").strip() or _derive_title(content)
     note = note_service.create_note(user_id, content=content, title=title, session_id=session_id)
     return ToolExecution(result={"status": "ok", "title": note["title"]})
+
+
+def _handle_search_notes(user_id: str, args: dict) -> ToolExecution:
+    notes = note_service.search_notes(user_id, query=args.get("query"))
+    return ToolExecution(result={"status": "ok", "notes": _summarize_notes(notes)})
+
+
+def _handle_draft_structured_note(args: dict, note_draft: dict | None) -> ToolExecution:
+    draft = dict(note_draft) if note_draft else {"questions_asked": 0}
+    draft["content"] = args.get("content", draft.get("content", ""))
+    if args.get("format"):
+        draft["format"] = args["format"]
+
+    if args.get("asking_clarification"):
+        if draft.get("questions_asked", 0) >= note_prompts.MAX_CLARIFYING_QUESTIONS:
+            # Cap reached — persist progress but tell the model to stop asking and write.
+            return ToolExecution(result={"status": "must_finalize"}, note_draft=draft)
+        draft["questions_asked"] = draft.get("questions_asked", 0) + 1
+        remaining = note_prompts.MAX_CLARIFYING_QUESTIONS - draft["questions_asked"]
+        return ToolExecution(result={"status": "ok", "questions_remaining": remaining}, note_draft=draft)
+
+    return ToolExecution(result={"status": "ok"}, note_draft=draft)
+
+
+def _handle_finalize_structured_note(user_id: str, args: dict, session_id: str | None) -> ToolExecution:
+    content = (args.get("content") or "").strip()
+    if not content:
+        return ToolExecution(result={"status": "missing_info", "missing": ["content"]})
+
+    title = (args.get("title") or "").strip() or _derive_title(content)
+    note = note_service.create_note(user_id, content=content, title=title, session_id=session_id)
+    return ToolExecution(result={"status": "ok", "title": note["title"]}, clear_note_draft=True)
+
+
+def _handle_discard_structured_note(note_draft: dict | None) -> ToolExecution:
+    if not note_draft:
+        return ToolExecution(result={"status": "no_draft"})
+    return ToolExecution(result={"status": "discarded"}, clear_note_draft=True)
+
+
+def _summarize_notes(notes: list[dict]) -> list[dict]:
+    return [{"id": n["id"], "title": n["title"], "content": n["content"]} for n in notes]
 
 
 def _derive_title(content: str, max_length: int = 60) -> str:

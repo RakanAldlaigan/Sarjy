@@ -152,6 +152,51 @@ def clear_pending_action(session_id: str, user_id: str) -> None:
     }).eq("id", session_id).eq("user_id", user_id).execute()
 
 
+# A structured-note draft older than this is treated as abandoned. Expiry lives in the
+# draft JSON (updated_at) rather than a dedicated column.
+NOTE_DRAFT_TTL_MINUTES = 30
+
+
+def get_note_draft(session_id: str, user_id: str) -> dict | None:
+    result = (
+        get_client()
+        .table("sessions")
+        .select("note_draft")
+        .eq("id", session_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
+
+    note_draft = result.data[0]["note_draft"]
+    if not note_draft:
+        return None
+
+    updated_at = note_draft.get("updated_at")
+    if updated_at and datetime.fromisoformat(updated_at) < datetime.now(timezone.utc) - timedelta(
+        minutes=NOTE_DRAFT_TTL_MINUTES
+    ):
+        clear_note_draft(session_id, user_id)
+        return None
+
+    return note_draft
+
+
+def set_note_draft(session_id: str, user_id: str, note_draft: dict) -> None:
+    note_draft = {**note_draft, "updated_at": datetime.now(timezone.utc).isoformat()}
+    get_client().table("sessions").update({"note_draft": note_draft}).eq("id", session_id).eq(
+        "user_id", user_id
+    ).execute()
+
+
+def clear_note_draft(session_id: str, user_id: str) -> None:
+    get_client().table("sessions").update({"note_draft": None}).eq("id", session_id).eq(
+        "user_id", user_id
+    ).execute()
+
+
 def list_sessions(user_id: str) -> list[dict]:
     client = get_client()
 
