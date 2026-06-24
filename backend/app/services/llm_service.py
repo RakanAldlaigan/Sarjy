@@ -1,6 +1,7 @@
 from google import genai
 from google.genai import types
 
+from app.core import timing
 from app.core.config import settings
 
 _client = genai.Client(api_key=settings.gemini_api_key)
@@ -41,6 +42,15 @@ def generate_with_tools(messages: list[dict], tools: list[types.Tool]) -> dict:
         contents=contents,
         config=types.GenerateContentConfig(system_instruction=system_instruction, tools=tools),
     )
+
+    if timing.TIMING_ENABLED:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            timing.add_tokens(
+                getattr(usage, "prompt_token_count", None),
+                getattr(usage, "candidates_token_count", None),
+                getattr(usage, "thoughts_token_count", None),
+            )
 
     part = response.candidates[0].content.parts[0]
     if part.function_call:

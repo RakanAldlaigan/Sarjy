@@ -1,5 +1,6 @@
 import { ChatMessage } from "@/app/components/ChatWindow";
 import { supabase } from "@/app/lib/supabase";
+import { markRequestSent, markResponseReceived, TurnTrace } from "@/app/lib/timing";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -38,7 +39,11 @@ export interface ChatResult {
   pendingAction: PendingAction | null;
 }
 
-export async function sendAudioToChat(audioBlob: Blob, sessionId?: string | null): Promise<ChatResult> {
+export async function sendAudioToChat(
+  audioBlob: Blob,
+  sessionId?: string | null,
+  trace?: TurnTrace | null,
+): Promise<ChatResult> {
   const formData = new FormData();
   formData.append("audio", audioBlob, "recording.webm");
   if (sessionId) {
@@ -46,11 +51,15 @@ export async function sendAudioToChat(audioBlob: Blob, sessionId?: string | null
   }
   formData.append("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone);
 
+  // Auth header resolves before the request is in flight; mark right before fetch.
+  const headers = await getAuthHeaders();
+  markRequestSent(trace ?? null);
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
-    headers: await getAuthHeaders(),
+    headers,
     body: formData,
   });
+  markResponseReceived(trace ?? null, response.headers.get("Server-Timing"));
 
   if (!response.ok) {
     throw new Error(`Chat request failed: ${response.status}`);
