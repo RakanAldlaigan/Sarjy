@@ -19,8 +19,8 @@ from datetime import UTC, datetime, timedelta
 from google.auth.exceptions import RefreshError
 from livekit.agents import RunContext, function_tool
 
-from agent import confirmation
-from agent.userdata import PENDING_ACTION_TTL_MINUTES, SarjyUserData
+import confirmation
+from userdata import PENDING_ACTION_TTL_MINUTES, SarjyUserData
 from app.services import assistant_tools, google_auth_service
 
 logger = logging.getLogger("sarjy-agent")

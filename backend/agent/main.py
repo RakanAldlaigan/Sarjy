@@ -3,11 +3,11 @@
 the /chat pipeline.
 
 Run locally (uses your mic/speakers; no LiveKit server or token needed):
-    cd backend && python -m agent.main console
+    cd backend/agent && python main.py console
 First run only, to fetch the bundled VAD model weights:
-    cd backend && python -m livekit.agents download-files
+    cd backend/agent && python main.py download-files
 Connect a real client (needs LIVEKIT_* env + a token from mint_token.py):
-    cd backend && python -m agent.main dev
+    cd backend/agent && python main.py dev
 """
 
 import asyncio
@@ -30,9 +30,10 @@ from livekit.agents import (
 )
 from livekit.plugins import deepgram, elevenlabs, google
 
-from agent import config, tools
-from agent.tools import ALL_TOOLS
-from agent.userdata import SarjyUserData
+import config
+import tools
+from tools import ALL_TOOLS
+from userdata import SarjyUserData
 from app.prompts.calendar import build_calendar_prompt
 from app.prompts.notes import build_notes_prompt
 from app.prompts.system import SYSTEM_PROMPT

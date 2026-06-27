@@ -4,9 +4,9 @@ browser client in `dev` mode). The identity here is a throwaway test value.
 TTL is set explicitly to 2 hours (the LiveKit default is 6h); it only gates the initial
 connection, not reconnects.
 
-Usage (from backend/, with LIVEKIT_API_KEY/SECRET in .env):
-    python -m agent.mint_token            # prints a token for room "sarjy-dev"
-    python -m agent.mint_token my-room me # custom room / identity
+Usage (from backend/agent/, with LIVEKIT_API_KEY/SECRET in .env):
+    python mint_token.py            # prints a token for room "sarjy-dev"
+    python mint_token.py my-room me # custom room / identity
 """
 
 import sys
@@ -14,7 +14,7 @@ from datetime import timedelta
 
 from livekit import api
 
-from agent import config
+import config
 
 TOKEN_TTL = timedelta(hours=2)
 DEFAULT_ROOM = "sarjy-dev"

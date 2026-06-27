@@ -18,6 +18,8 @@ frontend/.pnpm-debug.log*
 
 # Backend (Python)
 backend/.venv/
+backend/.venv-agent/
+backend/agent/.venv/
 backend/__pycache__/
 backend/**/__pycache__/
 backend/*.pyc

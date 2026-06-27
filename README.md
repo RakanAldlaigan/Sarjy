@@ -31,20 +31,22 @@ vars below).
 
 ### 2. Agent worker (streaming voice)
 
-The LiveKit voice agent runs as a separate worker process. It uses its own
-virtual environment because the `livekit-agents` dependency tree pins versions
-that differ from the backend's.
+The LiveKit voice agent is a self-contained worker in `backend/agent/`. It vendors
+the backend service code it reuses (under `backend/agent/app/`) so it can be built
+and deployed on its own, and it has its own dependency set.
 
 ```bash
-cd backend
-python -m venv .venv-agent && source .venv-agent/bin/activate
-pip install -r agent/requirements.txt
-python -m agent.main dev
+cd backend/agent
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python main.py download-files   # first run only: fetch VAD / turn-detector weights
+python main.py dev
 ```
 
 The worker reads the same `backend/.env` as the backend. It registers with
 LiveKit under `LIVEKIT_AGENT_NAME` and is dispatched into each voice room when
-the frontend connects.
+the frontend connects. A `Dockerfile` is included for container deploys (e.g.
+LiveKit Cloud: `lk agent deploy` from `backend/agent/`).
 
 ### 3. Frontend
 
