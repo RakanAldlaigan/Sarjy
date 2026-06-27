@@ -13,10 +13,6 @@ from google_auth_oauthlib.flow import Flow
 from app.core.config import settings
 from app.services.supabase_service import get_client
 
-# Google returns the calendar scope alongside openid/email/profile (already granted
-# during the Supabase Google sign-in and merged back via include_granted_scopes).
-# oauthlib raises on any scope change unless this is set; the extra scopes are
-# expected and harmless, so relax the check rather than the token exchange failing.
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -72,9 +68,6 @@ def _verify_state(state: str) -> str:
 
 
 def get_authorization_url(user_id: str) -> str:
-    # Confidential client (authenticates token exchange with client_secret), so PKCE
-    # isn't needed. Disabling it keeps the OAuth flow stateless — otherwise the library
-    # auto-generates a code_verifier here that the separate callback Flow can't recover.
     flow = Flow.from_client_config(
         _client_config(),
         scopes=CALENDAR_SCOPES,
@@ -113,7 +106,18 @@ def save_credentials(user_id: str, refresh_token: str) -> None:
     }).execute()
 
 
-def get_credentials(user_id: str) -> Credentials | None:
+def build_credentials(user_id: str) -> Credentials | None:
+    """Construct the user's Credentials object from the stored refresh token WITHOUT
+    eagerly refreshing it. Returns None if the user hasn't connected Calendar.
+
+    The returned object knows how to refresh itself: Google's client library calls
+    `credentials.refresh()` lazily before a request only when the access token is
+    missing or expired. The long-lived agent worker caches this object per session
+    (see SarjyUserData.google_credentials) and reuses it, so the ~2.8s OAuth refresh
+    happens at most once per token lifetime instead of on every calendar call.
+
+    `get_credentials` is the eager counterpart used by the stateless /chat path.
+    """
     result = (
         get_client()
         .table("google_credentials")
@@ -130,7 +134,7 @@ def get_credentials(user_id: str) -> Credentials | None:
         return None
 
     refresh_token = _get_fernet().decrypt(row["encrypted_refresh_token"].encode()).decode()
-    credentials = Credentials(
+    return Credentials(
         token=None,
         refresh_token=refresh_token,
         client_id=settings.google_client_id,
@@ -139,11 +143,19 @@ def get_credentials(user_id: str) -> Credentials | None:
         scopes=CALENDAR_SCOPES,
     )
 
+
+def get_credentials(user_id: str) -> Credentials | None:
+    """Load the user's credentials and eagerly refresh them so the returned object
+    carries a live access token. Used by the /chat path (which can't cache, so it pays
+    the refresh each request) and for the agent's first build of the session, after which
+    Google's library refreshes the cached object lazily on expiry."""
+    credentials = build_credentials(user_id)
+    if credentials is None:
+        return None
+
     try:
         credentials.refresh(Request())
     except RefreshError:
-        # Grant was revoked (e.g. user removed access in their Google account).
-        # Drop the stale credentials so future checks cleanly report "not connected".
         disconnect(user_id)
         return None
 

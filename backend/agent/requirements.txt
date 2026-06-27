@@ -1,0 +1,3 @@
+livekit-agents[deepgram,google,elevenlabs,silero,turn-detector]~=1.5
+livekit-api~=1.0
+pydantic-settings~=2.14

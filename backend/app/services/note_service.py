@@ -47,8 +47,6 @@ def search_notes(user_id: str, query: str | None = None, max_results: int = SEAR
         .eq("user_id", user_id)
     )
 
-    # Match any meaningful word against either the title or the content (same word-based
-    # ilike approach as reminder_service.find_reminders).
     words = [w for w in re.findall(r"\w+", query) if len(w) > 2] if query else []
     if words:
         conditions = [f"title.ilike.%{w}%" for w in words] + [f"content.ilike.%{w}%" for w in words]

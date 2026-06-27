@@ -1,11 +1,11 @@
 import re
 from datetime import datetime, timedelta, timezone
 
+from google.oauth2.credentials import Credentials
+
 from app.services import calendar_service
 from app.services.supabase_service import get_client
 
-# Reminders are mirrored to the "Sarjy Reminders" calendar as a short block
-# starting at remind_at, with a popup reminder firing at that exact time.
 REMINDER_EVENT_DURATION = timedelta(minutes=30)
 
 LIST_MAX_RESULTS = 20
@@ -15,13 +15,19 @@ FIND_MAX_RESULTS = 25
 MIRROR_ATTEMPTS = 2
 
 
-def _mirror_to_calendar(user_id: str, text: str, remind_at: datetime, timezone_name: str) -> tuple[str | None, str | None]:
+def _mirror_to_calendar(
+    user_id: str,
+    text: str,
+    remind_at: datetime,
+    timezone_name: str,
+    credentials: Credentials | None = None,
+) -> tuple[str | None, str | None]:
     """Creates the Google Calendar mirror for a reminder. Returns (google_event_id, calendar_warning).
 
     Retries once on a transient API error before giving up."""
     for attempt in range(MIRROR_ATTEMPTS):
         try:
-            calendar_id = calendar_service.get_or_create_reminders_calendar(user_id)
+            calendar_id = calendar_service.get_or_create_reminders_calendar(user_id, credentials=credentials)
             event = calendar_service.create_event(
                 user_id,
                 summary=text,
@@ -31,6 +37,7 @@ def _mirror_to_calendar(user_id: str, text: str, remind_at: datetime, timezone_n
                 reminder_minutes_before=0,
                 tag_as_sarjy=True,
                 calendar_id=calendar_id,
+                credentials=credentials,
             )
             return event["id"], None
         except calendar_service.CalendarNotConnectedError:
@@ -40,8 +47,16 @@ def _mirror_to_calendar(user_id: str, text: str, remind_at: datetime, timezone_n
                 return None, str(e)
 
 
-def create_reminder(user_id: str, text: str, remind_at: datetime, timezone_name: str) -> dict:
-    google_event_id, calendar_warning = _mirror_to_calendar(user_id, text, remind_at, timezone_name)
+def create_reminder(
+    user_id: str,
+    text: str,
+    remind_at: datetime,
+    timezone_name: str,
+    credentials: Credentials | None = None,
+) -> dict:
+    google_event_id, calendar_warning = _mirror_to_calendar(
+        user_id, text, remind_at, timezone_name, credentials=credentials
+    )
 
     inserted = (
         get_client()
@@ -106,7 +121,6 @@ def find_reminders(
     if time_max:
         query = query.lte("remind_at", time_max.isoformat())
 
-    # reference is optional: a date-only resolution lists everything in the window.
     words = [w for w in re.findall(r"\w+", reference) if len(w) > 2] if reference else []
     if words:
         query = query.or_(",".join(f"description.ilike.%{w}%" for w in words))
@@ -132,6 +146,7 @@ def update_reminder(
     timezone_name: str,
     text: str | None = None,
     remind_at: datetime | None = None,
+    credentials: Credentials | None = None,
 ) -> dict:
     updates: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if text is not None:
@@ -153,7 +168,7 @@ def update_reminder(
     google_event_id = reminder.get("google_event_id")
     if google_event_id and (text is not None or remind_at is not None):
         try:
-            calendar_id = calendar_service.get_or_create_reminders_calendar(user_id)
+            calendar_id = calendar_service.get_or_create_reminders_calendar(user_id, credentials=credentials)
             calendar_service.update_event(
                 user_id,
                 event_id=google_event_id,
@@ -162,6 +177,7 @@ def update_reminder(
                 start=remind_at,
                 end=remind_at + REMINDER_EVENT_DURATION if remind_at else None,
                 calendar_id=calendar_id,
+                credentials=credentials,
             )
         except calendar_service.CalendarNotConnectedError:
             calendar_warning = "not_connected"
@@ -172,7 +188,7 @@ def update_reminder(
     return reminder
 
 
-def delete_reminder(user_id: str, reminder_id: str) -> dict | None:
+def delete_reminder(user_id: str, reminder_id: str, credentials: Credentials | None = None) -> dict | None:
     existing = (
         get_client()
         .table("reminders")
@@ -191,9 +207,11 @@ def delete_reminder(user_id: str, reminder_id: str) -> dict | None:
 
     if google_event_id:
         try:
-            calendar_id = calendar_service.get_or_create_reminders_calendar(user_id)
-            calendar_service.delete_event(user_id, event_id=google_event_id, calendar_id=calendar_id)
+            calendar_id = calendar_service.get_or_create_reminders_calendar(user_id, credentials=credentials)
+            calendar_service.delete_event(
+                user_id, event_id=google_event_id, calendar_id=calendar_id, credentials=credentials
+            )
         except (calendar_service.CalendarNotConnectedError, calendar_service.CalendarAPIError):
-            pass  # Supabase row is already gone; calendar cleanup is best-effort
+            pass
 
     return {"id": reminder_id}

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -10,9 +11,6 @@ REMINDERS_CALENDAR_NAME = "Sarjy Reminders"
 CREATED_BY_KEY = "createdBy"
 CREATED_BY_VALUE = "sarjy"
 
-# Window used to detect back-to-back ("adjacent") events around a candidate
-# time range, since Google's timeMin/timeMax query excludes events that end
-# exactly at timeMin.
 ADJACENCY_WINDOW = timedelta(minutes=1)
 
 
@@ -24,8 +22,9 @@ class CalendarAPIError(Exception):
     """A Google Calendar API call failed."""
 
 
-def _get_service(user_id: str):
-    credentials = google_auth_service.get_credentials(user_id)
+def _get_service(user_id: str, credentials: Credentials | None = None):
+    if credentials is None:
+        credentials = google_auth_service.get_credentials(user_id)
     if credentials is None:
         raise CalendarNotConnectedError(user_id)
     return build("calendar", "v3", credentials=credentials, cache_discovery=False)
@@ -62,8 +61,9 @@ def find_events(
     time_max: datetime | None = None,
     max_results: int = 10,
     calendar_id: str = PRIMARY_CALENDAR_ID,
+    credentials: Credentials | None = None,
 ) -> list[dict]:
-    service = _get_service(user_id)
+    service = _get_service(user_id, credentials)
 
     params: dict = {
         "calendarId": calendar_id,
@@ -87,7 +87,11 @@ def find_events(
 
 
 def detect_conflicts(
-    user_id: str, start: datetime, end: datetime, exclude_event_id: str | None = None
+    user_id: str,
+    start: datetime,
+    end: datetime,
+    exclude_event_id: str | None = None,
+    credentials: Credentials | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Returns (overlapping, adjacent) events on the primary calendar near [start, end)."""
     events = find_events(
@@ -95,6 +99,7 @@ def detect_conflicts(
         time_min=start - ADJACENCY_WINDOW,
         time_max=end + ADJACENCY_WINDOW,
         max_results=25,
+        credentials=credentials,
     )
 
     overlapping = []
@@ -122,8 +127,9 @@ def create_event(
     reminder_minutes_before: int | None = None,
     calendar_id: str = PRIMARY_CALENDAR_ID,
     tag_as_sarjy: bool = True,
+    credentials: Credentials | None = None,
 ) -> dict:
-    service = _get_service(user_id)
+    service = _get_service(user_id, credentials)
 
     body: dict = {
         "summary": summary,
@@ -159,8 +165,9 @@ def update_event(
     start: datetime | None = None,
     end: datetime | None = None,
     calendar_id: str = PRIMARY_CALENDAR_ID,
+    credentials: Credentials | None = None,
 ) -> dict:
-    service = _get_service(user_id)
+    service = _get_service(user_id, credentials)
 
     body: dict = {}
     if summary is not None:
@@ -182,8 +189,13 @@ def update_event(
     return _event_to_dict(event)
 
 
-def delete_event(user_id: str, event_id: str, calendar_id: str = PRIMARY_CALENDAR_ID) -> None:
-    service = _get_service(user_id)
+def delete_event(
+    user_id: str,
+    event_id: str,
+    calendar_id: str = PRIMARY_CALENDAR_ID,
+    credentials: Credentials | None = None,
+) -> None:
+    service = _get_service(user_id, credentials)
     try:
         service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
     except HttpError as e:
@@ -192,8 +204,8 @@ def delete_event(user_id: str, event_id: str, calendar_id: str = PRIMARY_CALENDA
         raise CalendarAPIError(str(e)) from e
 
 
-def get_primary_calendar_timezone(user_id: str) -> str | None:
-    service = _get_service(user_id)
+def get_primary_calendar_timezone(user_id: str, credentials: Credentials | None = None) -> str | None:
+    service = _get_service(user_id, credentials)
     try:
         calendar = service.calendars().get(calendarId=PRIMARY_CALENDAR_ID).execute()
     except HttpError as e:
@@ -201,8 +213,8 @@ def get_primary_calendar_timezone(user_id: str) -> str | None:
     return calendar.get("timeZone")
 
 
-def get_or_create_reminders_calendar(user_id: str) -> str:
-    service = _get_service(user_id)
+def get_or_create_reminders_calendar(user_id: str, credentials: Credentials | None = None) -> str:
+    service = _get_service(user_id, credentials)
     calendar_id = google_auth_service.get_reminders_calendar_id(user_id)
 
     if calendar_id:
@@ -212,7 +224,6 @@ def get_or_create_reminders_calendar(user_id: str) -> str:
         except HttpError as e:
             if e.resp.status != 404:
                 raise CalendarAPIError(str(e)) from e
-            # User deleted the calendar — fall through and recreate it.
 
     try:
         created = service.calendars().insert(body={"summary": REMINDERS_CALENDAR_NAME}).execute()

@@ -6,6 +6,7 @@ interface NoteViewProps {
   note: NoteDetail;
   onClose: () => void;
   onDelete: (noteId: string) => void;
+  closeLabel?: string;
 }
 
 function formatCreatedAt(iso: string): string {
@@ -20,7 +21,7 @@ function formatCreatedAt(iso: string): string {
   });
 }
 
-export default function NoteView({ note, onClose, onDelete }: NoteViewProps) {
+export default function NoteView({ note, onClose, onDelete, closeLabel = "Back to chat" }: NoteViewProps) {
   return (
     <div className="flex h-full min-h-0 w-full max-w-2xl flex-1 flex-col gap-4 overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50/50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
       <div className="flex items-start justify-between gap-3">
@@ -41,7 +42,7 @@ export default function NoteView({ note, onClose, onDelete }: NoteViewProps) {
             onClick={onClose}
             className="rounded-xl px-3 py-1.5 text-sm font-medium text-zinc-500 transition-colors duration-150 hover:bg-zinc-200 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
           >
-            Back to chat
+            {closeLabel}
           </button>
         </div>
       </div>

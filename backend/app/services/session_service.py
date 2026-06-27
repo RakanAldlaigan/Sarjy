@@ -40,8 +40,17 @@ def create_session(user_id: str) -> str:
 
 
 def touch_session(session_id: str, user_id: str) -> bool:
+    """Synchronous ownership/existence gate for the chat path. The load-bearing
+    return bool stays on the critical path; the last_active_at refresh is deferred
+    to update_last_active (off the critical path) so the response never blocks on a
+    cosmetic timestamp write (readers are only the sidebar sort + a 30-min timeout
+    the live frontend never triggers)."""
+    return session_belongs_to_user(session_id, user_id)
+
+
+def update_last_active(session_id: str, user_id: str) -> None:
     now = datetime.now(timezone.utc)
-    result = (
+    (
         get_client()
         .table("sessions")
         .update({"last_active_at": now.isoformat()})
@@ -49,7 +58,6 @@ def touch_session(session_id: str, user_id: str) -> bool:
         .eq("user_id", user_id)
         .execute()
     )
-    return bool(result.data)
 
 
 def close_active_session(user_id: str) -> None:
@@ -78,8 +86,6 @@ def get_empty_session(user_id: str) -> str | None:
 
 
 def get_or_create_empty_session(user_id: str) -> str:
-    # Serializes check-then-create so concurrent "New session" requests
-    # can't each pass the empty-session check and create duplicates.
     with _new_session_lock:
         empty_session_id = get_empty_session(user_id)
         if empty_session_id:
@@ -111,6 +117,15 @@ def get_user_session_ids(user_id: str) -> list[str]:
     return [session["id"] for session in result.data]
 
 
+def _resolve_pending_action(session_id: str, user_id: str, pending_action: dict | None, expires_at: str | None) -> dict | None:
+    if not pending_action:
+        return None
+    if expires_at and datetime.fromisoformat(expires_at) < datetime.now(timezone.utc):
+        clear_pending_action(session_id, user_id)
+        return None
+    return pending_action
+
+
 def get_pending_action(session_id: str, user_id: str) -> dict | None:
     result = (
         get_client()
@@ -125,16 +140,7 @@ def get_pending_action(session_id: str, user_id: str) -> dict | None:
         return None
 
     row = result.data[0]
-    pending_action = row["pending_action"]
-    if not pending_action:
-        return None
-
-    expires_at = row["pending_action_expires_at"]
-    if expires_at and datetime.fromisoformat(expires_at) < datetime.now(timezone.utc):
-        clear_pending_action(session_id, user_id)
-        return None
-
-    return pending_action
+    return _resolve_pending_action(session_id, user_id, row["pending_action"], row["pending_action_expires_at"])
 
 
 def set_pending_action(session_id: str, user_id: str, pending_action: dict, ttl_minutes: int = 5) -> None:
@@ -152,36 +158,41 @@ def clear_pending_action(session_id: str, user_id: str) -> None:
     }).eq("id", session_id).eq("user_id", user_id).execute()
 
 
-# A structured-note draft older than this is treated as abandoned. Expiry lives in the
-# draft JSON (updated_at) rather than a dedicated column.
 NOTE_DRAFT_TTL_MINUTES = 30
 
 
-def get_note_draft(session_id: str, user_id: str) -> dict | None:
-    result = (
-        get_client()
-        .table("sessions")
-        .select("note_draft")
-        .eq("id", session_id)
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
-        return None
-
-    note_draft = result.data[0]["note_draft"]
+def _resolve_note_draft(session_id: str, user_id: str, note_draft: dict | None) -> dict | None:
     if not note_draft:
         return None
-
     updated_at = note_draft.get("updated_at")
     if updated_at and datetime.fromisoformat(updated_at) < datetime.now(timezone.utc) - timedelta(
         minutes=NOTE_DRAFT_TTL_MINUTES
     ):
         clear_note_draft(session_id, user_id)
         return None
-
     return note_draft
+
+
+def get_session_turn_state(session_id: str, user_id: str) -> tuple[dict | None, dict | None]:
+    """One round-trip read of both per-turn state fields from the single sessions
+    row. Replaces separate get_pending_action + get_note_draft on the chat path;
+    identical validation/expiry behavior (pending validated first, then note)."""
+    result = (
+        get_client()
+        .table("sessions")
+        .select("pending_action, pending_action_expires_at, note_draft")
+        .eq("id", session_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None, None
+
+    row = result.data[0]
+    pending_action = _resolve_pending_action(session_id, user_id, row["pending_action"], row["pending_action_expires_at"])
+    note_draft = _resolve_note_draft(session_id, user_id, row["note_draft"])
+    return pending_action, note_draft
 
 
 def set_note_draft(session_id: str, user_id: str, note_draft: dict) -> None:

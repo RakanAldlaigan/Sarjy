@@ -17,5 +17,10 @@ class Settings(BaseSettings):
     refresh_token_encryption_key: str = ""
     frontend_url: str = "http://localhost:3000"
 
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    livekit_agent_name: str = "sarjy-agent"
+
 
 settings = Settings()

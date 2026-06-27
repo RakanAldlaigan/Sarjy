@@ -1,8 +1,13 @@
-from datetime import datetime, timezone
+import threading
+from datetime import datetime, timedelta, timezone
 
 from app.services.supabase_service import get_client
 
 TIMEZONE_KEY = "timezone"
+
+TZ_WRITE_THROTTLE_MINUTES = 30
+_tz_write_cache: dict[str, tuple[str, datetime]] = {}
+_tz_cache_lock = threading.Lock()
 
 
 def get_user_timezone(user_id: str) -> str | None:
@@ -25,3 +30,16 @@ def set_user_timezone(user_id: str, timezone_name: str) -> None:
         "value": timezone_name,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }).execute()
+
+
+def set_user_timezone_throttled(user_id: str, timezone_name: str) -> None:
+    """Persist the timezone at most once per TZ_WRITE_THROTTLE_MINUTES per user,
+    plus immediately whenever the value changes. Skips the redundant per-turn write
+    when the same tz was persisted recently."""
+    now = datetime.now(timezone.utc)
+    with _tz_cache_lock:
+        cached = _tz_write_cache.get(user_id)
+        if cached and cached[0] == timezone_name and now - cached[1] < timedelta(minutes=TZ_WRITE_THROTTLE_MINUTES):
+            return
+        _tz_write_cache[user_id] = (timezone_name, now)
+    set_user_timezone(user_id, timezone_name)

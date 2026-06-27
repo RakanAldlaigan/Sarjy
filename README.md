@@ -1,35 +1,23 @@
 # Sarjy
 
 A voice assistant web app for capturing notes, tasks, and reminders by voice,
-with cross-session memory and Google Calendar integration. Built as a
-take-home project for Sarj.
-
-Core loop: voice input → speech-to-text → LLM → text-to-speech → voice output.
-
-## Current status
-
-- Voice conversations: record audio, transcribe it, get an LLM reply, and
-  hear it spoken back
-- Session history with a sidebar to browse, switch between, and delete past
-  sessions
-- Cross-session memory: the assistant recalls relevant context from earlier
-  conversations
-- Google sign-in via Supabase Auth, with all sessions, messages, and memory
-  scoped per user
+with Google Calendar integration.
 
 ## Tech stack
 
 - **Frontend**: Next.js (App Router, TypeScript, Tailwind CSS)
 - **Backend**: FastAPI (Python)
+- **Realtime voice**: LiveKit (streaming agent worker)
 - **Database**: PostgreSQL via Supabase
 - **Auth**: Google OAuth via Supabase Auth
-- **STT**: Deepgram
-- **TTS**: ElevenLabs
-- **LLM**: Google Gemini 2.5 Flash
+- **STT**: Deepgram &nbsp;&nbsp; **TTS**: ElevenLabs &nbsp;&nbsp; **LLM**: Google Gemini 2.5 Flash
 
 ## To run locally
 
-### Backend
+The app has three components: the **backend** API, the **agent worker** (the
+streaming voice agent), and the **frontend**. Run all three.
+
+### 1. Backend (API)
 
 ```bash
 cd backend
@@ -38,21 +26,27 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Runs on `http://localhost:8000`. Requires a `.env` file in `backend/` (see
-`.env.example` at the project root):
+Runs on `http://localhost:8000`. Requires a `backend/.env` file (see the env
+vars below).
 
-```
-GEMINI_API_KEY=
-DEEPGRAM_API_KEY=
-ELEVENLABS_API_KEY=
-ELEVENLABS_VOICE_ID=
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
+### 2. Agent worker (streaming voice)
+
+The LiveKit voice agent runs as a separate worker process. It uses its own
+virtual environment because the `livekit-agents` dependency tree pins versions
+that differ from the backend's.
+
+```bash
+cd backend
+python -m venv .venv-agent && source .venv-agent/bin/activate
+pip install -r agent/requirements.txt
+python -m agent.main dev
 ```
 
-### Frontend
+The worker reads the same `backend/.env` as the backend. It registers with
+LiveKit under `LIVEKIT_AGENT_NAME` and is dispatched into each voice room when
+the frontend connects.
+
+### 3. Frontend
 
 ```bash
 cd frontend
@@ -60,23 +54,65 @@ npm install
 npm run dev
 ```
 
-Runs on `http://localhost:3000`. Requires a `frontend/.env.local` file:
+Runs on `http://localhost:3000`. Requires a `frontend/.env.local` file (see
+below).
+
+## Environment variables
+
+### `backend/.env`
+
+Read by both the backend API and the agent worker. See `.env.example` for a
+template.
+
+```
+# LLM / STT / TTS
+GEMINI_API_KEY=
+DEEPGRAM_API_KEY=
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=
+
+# Supabase (the backend runs as the service role)
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# Google OAuth (Calendar access)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=http://localhost:8000/calendar/oauth/callback
+
+# Fernet key used to encrypt stored Google refresh tokens.
+# Generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+REFRESH_TOKEN_ENCRYPTION_KEY=
+
+# LiveKit (realtime voice)
+LIVEKIT_URL=
+LIVEKIT_API_KEY=
+LIVEKIT_API_SECRET=
+LIVEKIT_AGENT_NAME=sarjy-agent
+
+# URL the frontend is served from (CORS + OAuth redirects)
+FRONTEND_URL=http://localhost:3000
+```
+
+`GOOGLE_REDIRECT_URI`, `LIVEKIT_AGENT_NAME`, and `FRONTEND_URL` have the
+defaults shown above and can be omitted locally. Everything else is required.
+
+### `frontend/.env.local`
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+# Optional — defaults to http://localhost:8000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
-### Supabase setup
+The frontend gets its LiveKit connection URL and access token from the backend
+at runtime, so no LiveKit variables are needed here.
 
-Run the SQL in `backend/app/db/schema.sql` against your Supabase project,
-and enable the Google provider in Supabase Auth settings using the same
-Google OAuth client credentials.
+## Supabase setup
 
-## Next steps
-
-- Google Calendar integration (create/view events by voice)
-- "Discussion mode" for open-ended conversation beyond notes/tasks/reminders
-- Smarter cross-session memory — currently a flat cap on recent messages
-  across past sessions; ideally summarization or a dedicated facts table
-- Deployment (frontend and backend hosting, production env config)
+Run the SQL in `backend/app/db/schema.sql` against your Supabase project, and
+enable the Google provider in Supabase Auth settings using the same Google
+OAuth client credentials.

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useVoiceRecorder } from "@/app/hooks/useVoiceRecorder";
 import { playAudio } from "@/app/lib/audio";
 import { ChatResult, sendAudioToChat } from "@/app/lib/api";
-import { finishTurn, markAudioPlaying, startTurn } from "@/app/lib/timing";
 
 interface VoiceInputProps {
   sessionId: string | null;
@@ -26,13 +25,12 @@ export default function VoiceInput({ sessionId, onResult, onBusyChange }: VoiceI
 
     const process = async () => {
       setIsProcessing(true);
-      const trace = startTurn();
       try {
-        const result = await sendAudioToChat(audioBlob, recordingSessionIdRef.current, trace);
+        const result = await sendAudioToChat(audioBlob, recordingSessionIdRef.current);
         onResult(result);
 
         if (result.audioBase64) {
-          await playAudio(result.audioBase64, trace ? () => markAudioPlaying(trace) : undefined);
+          await playAudio(result.audioBase64);
         }
       } catch {
         onResult({
@@ -43,7 +41,6 @@ export default function VoiceInput({ sessionId, onResult, onBusyChange }: VoiceI
           pendingAction: null,
         });
       } finally {
-        finishTurn(trace);
         setIsProcessing(false);
       }
     };

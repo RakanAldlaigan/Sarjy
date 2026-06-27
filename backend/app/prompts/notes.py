@@ -1,7 +1,5 @@
 from google.genai import types
 
-# Hard cap on clarifying questions in the structured-note flow. Enforced server-side in
-# assistant_tools (draft_structured_note) and surfaced to the model via build_notes_prompt.
 MAX_CLARIFYING_QUESTIONS = 3
 
 NOTES_PROMPT = """You can save notes for the user — pieces of text they want to keep and read

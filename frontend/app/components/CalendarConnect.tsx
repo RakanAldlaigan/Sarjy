@@ -53,7 +53,6 @@ export default function CalendarConnect() {
       await disconnectCalendar();
       setConnected(false);
     } catch {
-      // ignore — user can retry
     } finally {
       setBusy(false);
     }

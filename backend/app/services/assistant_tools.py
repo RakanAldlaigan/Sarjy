@@ -3,13 +3,12 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from google.genai import types
+from google.oauth2.credentials import Credentials
 
 from app.prompts import calendar as calendar_prompts
 from app.prompts import notes as note_prompts
 from app.services import calendar_service, note_service, preferences_service, reminder_service
 
-# Window for a title-only resolution ("the dentist thing") when no date is given,
-# and the cap on how many candidates to read back when a reference is ambiguous.
 RESOLUTION_WINDOW = timedelta(days=14)
 MAX_CANDIDATES = 5
 
@@ -26,7 +25,7 @@ class ToolExecution:
 
 def get_effective_timezone(user_id: str, browser_timezone: str | None) -> str:
     if browser_timezone:
-        preferences_service.set_user_timezone(user_id, browser_timezone)
+        preferences_service.set_user_timezone_throttled(user_id, browser_timezone)
         return browser_timezone
 
     stored = preferences_service.get_user_timezone(user_id)
@@ -46,9 +45,6 @@ def get_effective_timezone(user_id: str, browser_timezone: str | None) -> str:
 def get_available_tools(pending_action: dict | None) -> list[types.Tool]:
     declarations = list(calendar_prompts.BASE_FUNCTION_DECLARATIONS)
     if pending_action:
-        # While an action is awaiting confirmation, keep the focus on resolving it: offer the
-        # voice confirm/cancel tools (UI-card actions are confirmed on screen) and don't open
-        # an unrelated note-capture path.
         if not pending_action.get("requires_ui_confirmation"):
             declarations = declarations + [
                 calendar_prompts.CONFIRM_PENDING_ACTION,
@@ -67,6 +63,7 @@ def execute_tool(
     pending_action: dict | None,
     session_id: str | None = None,
     note_draft: dict | None = None,
+    credentials: Credentials | None = None,
 ) -> ToolExecution:
     if tool_name == "save_note":
         return _handle_save_note(user_id, args, session_id)
@@ -79,13 +76,13 @@ def execute_tool(
     if tool_name == "discard_structured_note":
         return _handle_discard_structured_note(note_draft)
     if tool_name == "get_calendar_events":
-        return _handle_get_events(user_id, args, timezone_name)
+        return _handle_get_events(user_id, args, timezone_name, credentials)
     if tool_name == "create_calendar_event":
-        return _handle_create_event(user_id, args, timezone_name)
+        return _handle_create_event(user_id, args, timezone_name, credentials)
     if tool_name == "update_calendar_event":
-        return _handle_update_event(user_id, args, timezone_name)
+        return _handle_update_event(user_id, args, timezone_name, credentials)
     if tool_name == "delete_calendar_event":
-        return _handle_delete_event(user_id, args, timezone_name)
+        return _handle_delete_event(user_id, args, timezone_name, credentials)
     if tool_name == "create_reminder":
         return _handle_create_reminder(user_id, args, timezone_name)
     if tool_name == "list_reminders":
@@ -95,15 +92,18 @@ def execute_tool(
     if tool_name == "delete_reminder":
         return _handle_delete_reminder(user_id, args, timezone_name)
     if tool_name == "confirm_pending_action":
-        return _handle_confirm(user_id, pending_action)
+        return _handle_confirm(user_id, pending_action, credentials)
     if tool_name == "cancel_pending_action":
         return _handle_cancel(pending_action)
     return ToolExecution(result={"status": "error", "message": f"Unknown tool: {tool_name}"})
 
 
-def execute_pending_action(user_id: str, pending_action: dict) -> dict:
+def execute_pending_action(user_id: str, pending_action: dict, credentials: Credentials | None = None) -> dict:
     """Executes a fully-resolved pending action against Google Calendar. Used by both
-    confirm_pending_action (voice flow) and the UI confirmation card endpoint."""
+    confirm_pending_action (voice flow) and the UI confirmation card endpoint.
+
+    `credentials` defaults to None (the /chat path, unchanged); the agent passes its
+    cached per-session credential so the calendar write reuses a live token."""
     action_type = pending_action["action_type"]
     params = pending_action["params"]
 
@@ -117,6 +117,7 @@ def execute_pending_action(user_id: str, pending_action: dict) -> dict:
                 timezone_name=params["timezone_name"],
                 description=params.get("description"),
                 reminder_minutes_before=params.get("reminder_minutes_before"),
+                credentials=credentials,
             )
             return {"status": "success", "event": event}
 
@@ -129,11 +130,12 @@ def execute_pending_action(user_id: str, pending_action: dict) -> dict:
                 description=params.get("new_description"),
                 start=datetime.fromisoformat(params["new_start"]) if params.get("new_start") else None,
                 end=datetime.fromisoformat(params["new_end"]) if params.get("new_end") else None,
+                credentials=credentials,
             )
             return {"status": "success", "event": event}
 
         if action_type == "delete_calendar_event":
-            calendar_service.delete_event(user_id, event_id=params["event_id"])
+            calendar_service.delete_event(user_id, event_id=params["event_id"], credentials=credentials)
             return {"status": "success"}
 
         if action_type == "create_reminder":
@@ -142,6 +144,7 @@ def execute_pending_action(user_id: str, pending_action: dict) -> dict:
                 text=params["text"],
                 remind_at=datetime.fromisoformat(params["remind_at"]),
                 timezone_name=params["timezone_name"],
+                credentials=credentials,
             )
             return {"status": "success", "reminder": reminder}
 
@@ -152,11 +155,12 @@ def execute_pending_action(user_id: str, pending_action: dict) -> dict:
                 timezone_name=params["timezone_name"],
                 text=params.get("new_text"),
                 remind_at=datetime.fromisoformat(params["new_remind_at"]) if params.get("new_remind_at") else None,
+                credentials=credentials,
             )
             return {"status": "success", "reminder": reminder}
 
         if action_type == "delete_reminder":
-            reminder_service.delete_reminder(user_id, reminder_id=params["reminder_id"])
+            reminder_service.delete_reminder(user_id, reminder_id=params["reminder_id"], credentials=credentials)
             return {"status": "success"}
 
         return {"status": "error", "message": f"Unknown action type: {action_type}"}
@@ -200,16 +204,19 @@ def describe_execution_result(result: dict, pending_action: dict) -> str:
     return "Something unexpected happened, so I didn't make that change."
 
 
-# --- tool handlers -----------------------------------------------------------
 
 
-def _handle_get_events(user_id: str, args: dict, timezone_name: str) -> ToolExecution:
+def _handle_get_events(
+    user_id: str, args: dict, timezone_name: str, credentials: Credentials | None = None
+) -> ToolExecution:
     time_min = _parse_optional_dt(args.get("time_min"), timezone_name) or datetime.now(timezone.utc)
     time_max = _parse_optional_dt(args.get("time_max"), timezone_name)
     query = args.get("query") or None
 
     try:
-        events = calendar_service.find_events(user_id, query=query, time_min=time_min, time_max=time_max, max_results=10)
+        events = calendar_service.find_events(
+            user_id, query=query, time_min=time_min, time_max=time_max, max_results=10, credentials=credentials
+        )
     except calendar_service.CalendarNotConnectedError:
         return ToolExecution(result={"status": "not_connected"})
     except calendar_service.CalendarAPIError as e:
@@ -218,7 +225,9 @@ def _handle_get_events(user_id: str, args: dict, timezone_name: str) -> ToolExec
     return ToolExecution(result={"status": "ok", "events": _summarize_events(events)})
 
 
-def _handle_create_event(user_id: str, args: dict, timezone_name: str) -> ToolExecution:
+def _handle_create_event(
+    user_id: str, args: dict, timezone_name: str, credentials: Credentials | None = None
+) -> ToolExecution:
     summary = args.get("summary")
     start = _parse_optional_dt(args.get("start"), timezone_name)
     end = _parse_optional_dt(args.get("end"), timezone_name)
@@ -228,11 +237,10 @@ def _handle_create_event(user_id: str, args: dict, timezone_name: str) -> ToolEx
     if missing:
         return ToolExecution(result={"status": "missing_info", "missing": missing})
 
-    # Duplicate check runs on the required slots, before the reminder question. Once the
-    # user has answered that question (reminder_minutes_before present) we've moved past
-    # the duplicate step, so don't re-surface it — otherwise "keep the name" would loop.
     if "reminder_minutes_before" not in args:
-        duplicate_warning = _format_duplicate_warning(_check_duplicates(user_id, summary, start, end), summary)
+        duplicate_warning = _format_duplicate_warning(
+            _check_duplicates(user_id, summary, start, end, credentials), summary
+        )
         if duplicate_warning:
             return ToolExecution(result={"status": "duplicate_warning", "duplicate_warning": duplicate_warning})
         return ToolExecution(result={"status": "reminder_required"})
@@ -240,7 +248,7 @@ def _handle_create_event(user_id: str, args: dict, timezone_name: str) -> ToolEx
     reminder_minutes_before = args.get("reminder_minutes_before")
 
     try:
-        overlapping, adjacent = calendar_service.detect_conflicts(user_id, start, end)
+        overlapping, adjacent = calendar_service.detect_conflicts(user_id, start, end, credentials=credentials)
     except calendar_service.CalendarNotConnectedError:
         return ToolExecution(result={"status": "not_connected"})
     except calendar_service.CalendarAPIError as e:
@@ -283,9 +291,13 @@ def _handle_create_event(user_id: str, args: dict, timezone_name: str) -> ToolEx
     )
 
 
-def _handle_update_event(user_id: str, args: dict, timezone_name: str) -> ToolExecution:
+def _handle_update_event(
+    user_id: str, args: dict, timezone_name: str, credentials: Credentials | None = None
+) -> ToolExecution:
     try:
-        status, matches = _resolve_target(_event_search(user_id), args.get("title"), args.get("date"), timezone_name)
+        status, matches = _resolve_target(
+            _event_search(user_id, credentials), args.get("title"), args.get("date"), timezone_name
+        )
     except calendar_service.CalendarNotConnectedError:
         return ToolExecution(result={"status": "not_connected"})
     except calendar_service.CalendarAPIError as e:
@@ -312,7 +324,7 @@ def _handle_update_event(user_id: str, args: dict, timezone_name: str) -> ToolEx
     if new_start and new_end:
         try:
             overlapping, adjacent = calendar_service.detect_conflicts(
-                user_id, new_start, new_end, exclude_event_id=event["id"]
+                user_id, new_start, new_end, exclude_event_id=event["id"], credentials=credentials
             )
         except calendar_service.CalendarAPIError as e:
             return ToolExecution(result={"status": "error", "message": str(e)})
@@ -353,9 +365,13 @@ def _handle_update_event(user_id: str, args: dict, timezone_name: str) -> ToolEx
     )
 
 
-def _handle_delete_event(user_id: str, args: dict, timezone_name: str) -> ToolExecution:
+def _handle_delete_event(
+    user_id: str, args: dict, timezone_name: str, credentials: Credentials | None = None
+) -> ToolExecution:
     try:
-        status, matches = _resolve_target(_event_search(user_id), args.get("title"), args.get("date"), timezone_name)
+        status, matches = _resolve_target(
+            _event_search(user_id, credentials), args.get("title"), args.get("date"), timezone_name
+        )
     except calendar_service.CalendarNotConnectedError:
         return ToolExecution(result={"status": "not_connected"})
     except calendar_service.CalendarAPIError as e:
@@ -490,10 +506,12 @@ def _handle_delete_reminder(user_id: str, args: dict, timezone_name: str) -> Too
     )
 
 
-def _handle_confirm(user_id: str, pending_action: dict | None) -> ToolExecution:
+def _handle_confirm(
+    user_id: str, pending_action: dict | None, credentials: Credentials | None = None
+) -> ToolExecution:
     if pending_action is None:
         return ToolExecution(result={"status": "no_pending_action"})
-    result = execute_pending_action(user_id, pending_action)
+    result = execute_pending_action(user_id, pending_action, credentials)
     return ToolExecution(result=result, clear_pending=True)
 
 
@@ -526,7 +544,6 @@ def _handle_draft_structured_note(args: dict, note_draft: dict | None) -> ToolEx
 
     if args.get("asking_clarification"):
         if draft.get("questions_asked", 0) >= note_prompts.MAX_CLARIFYING_QUESTIONS:
-            # Cap reached — persist progress but tell the model to stop asking and write.
             return ToolExecution(result={"status": "must_finalize"}, note_draft=draft)
         draft["questions_asked"] = draft.get("questions_asked", 0) + 1
         remaining = note_prompts.MAX_CLARIFYING_QUESTIONS - draft["questions_asked"]
@@ -564,7 +581,6 @@ def _derive_title(content: str, max_length: int = 60) -> str:
     return words[: max_length - 3].rstrip() + "..."
 
 
-# --- resolution & formatting helpers -----------------------------------------
 
 
 def _parse_optional_dt(value: str | None, timezone_name: str) -> datetime | None:
@@ -583,10 +599,10 @@ def _day_window(date_value: str, timezone_name: str) -> tuple[datetime, datetime
     return start, start + timedelta(days=1)
 
 
-def _event_search(user_id: str):
+def _event_search(user_id: str, credentials: Credentials | None = None):
     def search(query: str | None, time_min: datetime, time_max: datetime) -> list[dict]:
         return calendar_service.find_events(
-            user_id, query=query, time_min=time_min, time_max=time_max, max_results=25
+            user_id, query=query, time_min=time_min, time_max=time_max, max_results=25, credentials=credentials
         )
 
     return search
@@ -624,8 +640,6 @@ def _resolve_target(search_fn, title: str | None, date: str | None, timezone_nam
     if not matches:
         return "not_found", []
 
-    # A title with a single match is high-confidence. Date-only is a weak signal,
-    # so always ask which one — even when only one event falls on that day.
     if title and len(matches) == 1:
         return "resolved", matches
     return "ambiguous", matches[:MAX_CANDIDATES]
@@ -663,10 +677,17 @@ def _describe_delete_reminder(reminder: dict, timezone_name: str) -> str:
     return f'Delete the reminder "{reminder["description"]}" ({_format_dt(remind_at, timezone_name)}).'
 
 
-def _check_duplicates(user_id: str, summary: str, start: datetime, end: datetime) -> list[dict]:
+def _check_duplicates(
+    user_id: str, summary: str, start: datetime, end: datetime, credentials: Credentials | None = None
+) -> list[dict]:
     try:
         return calendar_service.find_events(
-            user_id, query=summary, time_min=start - timedelta(days=1), time_max=end + timedelta(days=1), max_results=10
+            user_id,
+            query=summary,
+            time_min=start - timedelta(days=1),
+            time_max=end + timedelta(days=1),
+            max_results=10,
+            credentials=credentials,
         )
     except (calendar_service.CalendarNotConnectedError, calendar_service.CalendarAPIError):
         return []
@@ -692,7 +713,6 @@ def _format_conflict_warning(overlapping: list[dict], adjacent: list[dict]) -> s
 
 
 def _format_duplicate_warning(duplicates: list[dict], summary: str) -> str | None:
-    # Only an exact (case-insensitive) title match counts as "the same name".
     matches = [e for e in duplicates if e["summary"].strip().lower() == summary.strip().lower()]
     if not matches:
         return None

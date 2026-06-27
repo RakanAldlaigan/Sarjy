@@ -86,12 +86,49 @@ Rules:
   or failed."""
 
 
-def build_calendar_prompt(now: datetime, timezone_name: str, pending_action: dict | None) -> str:
-    prompt = CALENDAR_PROMPT + f"\n\nCurrent date/time: {now.isoformat()}, timezone: {timezone_name}."
+_CARD_CREATE_SENTENCE = (
+    '    - "confirmation_required": read back the event; the user confirms it on the\n'
+    "      on-screen card."
+)
+_VOICE_CREATE_SENTENCE = (
+    '    - "confirmation_required": read back the event’s specifics (title, day, start\n'
+    "      and end time) and ask the user to confirm out loud before it is created."
+)
+_CARD_RULES_SENTENCE = (
+    "  Calendar event changes (create, update, delete) are confirmed on an on-screen\n"
+    '  card — tell the user to use it; a spoken "yes" does not confirm them. Reminder\n'
+    "  changes are confirmed by voice — ask the user and wait for their reply before\n"
+    "  calling confirm_pending_action."
+)
+_VOICE_RULES_SENTENCE = (
+    "  ALL changes (calendar events AND reminders — create, update, delete) are\n"
+    "  confirmed by VOICE: always read back the SPECIFIC target (e.g. \"delete the\n"
+    '  dentist event on Friday at 3 PM\"), then ask for a yes or no. Only an\n'
+    '  unambiguous affirmative ("yes", "go ahead", "confirm") counts — treat a hedge\n'
+    '  ("maybe", "I guess"), a question back, silence, or anything unclear as NOT a\n'
+    "  yes: re-ask once (\"Sorry — should I [action]? Yes or no?\"), then drop it. On a\n"
+    "  clear yes call confirm_pending_action; on a no or a change of mind call\n"
+    "  cancel_pending_action. This holds AFTER a re-ask too: a plain yes still means\n"
+    "  confirm_pending_action and a plain no still means cancel_pending_action — never\n"
+    "  re-issue the create/update/delete tool to answer a yes/no (that re-proposes and\n"
+    "  loops). ONLY re-issue the matching tool when the user actually CHANGES a detail\n"
+    '  ("make it 4 PM", "call it Jim"), to re-propose the corrected version.'
+)
+
+
+def build_calendar_prompt(
+    now: datetime, timezone_name: str, pending_action: dict | None, confirm_mode: str = "card"
+) -> str:
+    base = CALENDAR_PROMPT
+    if confirm_mode == "voice":
+        base = base.replace(_CARD_CREATE_SENTENCE, _VOICE_CREATE_SENTENCE)
+        base = base.replace(_CARD_RULES_SENTENCE, _VOICE_RULES_SENTENCE)
+
+    prompt = base + f"\n\nCurrent date/time: {now.isoformat()}, timezone: {timezone_name}."
 
     if pending_action:
         summary = pending_action.get("summary", "")
-        if pending_action.get("requires_ui_confirmation"):
+        if confirm_mode == "card" and pending_action.get("requires_ui_confirmation"):
             prompt += (
                 f"\n\nThere is a pending action awaiting confirmation on the on-screen card: {summary} "
                 "The user cannot confirm or cancel it by voice. "

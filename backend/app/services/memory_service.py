@@ -1,10 +1,6 @@
 from app.services import session_service
 from app.services.supabase_service import get_client
 
-# Flat cap across all past sessions combined. 20 proved too small — a fact
-# mentioned hours earlier could fall out of the window after normal use in
-# other sessions. 60 gives more headroom without a schema change; a proper
-# fix (summarization or a dedicated facts table) is a bigger change for later.
 CONTEXT_MESSAGE_LIMIT = 60
 
 
